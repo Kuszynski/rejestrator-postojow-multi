@@ -1,7 +1,7 @@
 {
-  "name": "Rejestrator Postojów",
-  "short_name": "Postoje",
-  "description": "Aplikacja do rejestrowania postojów produkcyjnych",
+  "name": "StansLogg",
+  "short_name": "StansLogg",
+  "description": "Professional downtime tracking solution",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
