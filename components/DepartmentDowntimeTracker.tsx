@@ -1131,10 +1131,51 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                         <div className="text-purple-100 text-sm">min total</div>
                       </div>
                       <div className="flex gap-2">
-                        <button className="px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-sm font-medium transition-colors">
+                        <button 
+                          onClick={() => {
+                            const today = new Date();
+                            const weekStart = new Date(today);
+                            const dayOfWeek = today.getDay();
+                            const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                            weekStart.setDate(today.getDate() + daysToMonday);
+                            const weekEnd = new Date(weekStart);
+                            weekEnd.setDate(weekEnd.getDate() + 6);
+                            
+                            const weekDowntimes = downtimeHistory.filter(d => {
+                              const entryDate = new Date(d.endTime || d.startTime);
+                              return entryDate >= weekStart && entryDate <= weekEnd;
+                            });
+                            
+                            const csvContent = [
+                              ['#', 'Dato', 'Tid', 'Maskin', 'Årsak', 'Varighet', 'Post Nr', 'Operatør'],
+                              ...weekDowntimes.map((d, index) => [
+                                index + 1,
+                                new Date(d.startTime).toLocaleDateString('nb-NO'),
+                                `${new Date(d.startTime).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}-${new Date(d.endTime).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}`,
+                                d.machineName,
+                                d.comment,
+                                `${d.duration} min`,
+                                d.postNumber || '-',
+                                d.operatorName
+                              ])
+                            ].map(row => row.join(',')).join('\n');
+                            
+                            const blob = new Blob([csvContent], { type: 'text/csv' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `uke-rapport-${new Date().toISOString().split('T')[0]}.csv`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-sm font-medium transition-colors"
+                        >
                           Excel
                         </button>
-                        <button className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-medium transition-colors">
+                        <button 
+                          onClick={() => window.print()}
+                          className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-medium transition-colors"
+                        >
                           📄 PDF
                         </button>
                       </div>
