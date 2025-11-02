@@ -25,6 +25,7 @@ interface DowntimeEntry {
   operatorId: string;
   operatorName: string;
   departmentId: number;
+  imageUrl?: string;
 }
 
 interface DepartmentDowntimeTrackerProps {
@@ -51,6 +52,8 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
   const [editStartTime, setEditStartTime] = useState('');
   const [editEndTime, setEditEndTime] = useState('');
   const [editMinutes, setEditMinutes] = useState('');
+  const [editImage, setEditImage] = useState<File | null>(null);
+  const [editImageUrl, setEditImageUrl] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [departmentUsers, setDepartmentUsers] = useState([]);
@@ -168,7 +171,8 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
         date: downtime.date || new Date(downtime.start_time).toISOString().split('T')[0],
         operatorId: downtime.operator_id,
         operatorName: downtime.operator_id,
-        departmentId: downtime.department_id
+        departmentId: downtime.department_id,
+        imageUrl: downtime.photo_url
       }));
 
       enrichedData = enrichedData.filter(d => d.departmentId === user.departmentId);
@@ -336,6 +340,8 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     setEditStartTime(new Date(downtime.startTime).toISOString().slice(0, 16));
     setEditEndTime(new Date(downtime.endTime).toISOString().slice(0, 16));
     setEditMinutes(downtime.duration.toString());
+    setEditImage(null);
+    setEditImageUrl(downtime.imageUrl || '');
   };
 
   const saveEdit = async () => {
@@ -348,6 +354,33 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     const startTime = new Date(editStartTime);
     const endTime = new Date(startTime.getTime() + duration * 60 * 1000);
 
+    let imageUrl = editImageUrl;
+
+    // Upload new image if selected
+    if (editImage) {
+      const fileExt = editImage.name.split('.').pop();
+      const fileName = `${editModal.id}_${Date.now()}.${fileExt}`;
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('images')
+        .upload(fileName, editImage, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        alert('Feil ved opplasting av bilde: ' + uploadError.message);
+        return;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('images')
+        .getPublicUrl(fileName);
+      
+      imageUrl = urlData.publicUrl;
+    }
+
     const { error } = await supabase
       .from('downtimes')
       .update({
@@ -355,7 +388,8 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
         post_number: editPostNumber.trim() || null,
         start_time: startTime.toISOString(),
         end_time: endTime.toISOString(),
-        duration: duration
+        duration: duration,
+        photo_url: imageUrl || null
       })
       .eq('id', editModal.id);
 
@@ -369,6 +403,8 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
       setEditStartTime('');
       setEditEndTime('');
       setEditMinutes('');
+      setEditImage(null);
+      setEditImageUrl('');
     }
   };
 
@@ -1856,6 +1892,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                           <th className="text-left p-4 font-semibold text-gray-700">Varighet</th>
                           <th className="text-left p-4 font-semibold text-gray-700">Post Nr</th>
                           <th className="text-left p-4 font-semibold text-gray-700">Operatør</th>
+                          <th className="text-left p-4 font-semibold text-gray-700">Bilde</th>
                           <th className="text-left p-4 font-semibold text-gray-700">Handlinger</th>
                         </tr>
                       </thead>
@@ -1906,6 +1943,11 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                               </td>
                               <td className="p-4">
                                 <div className="text-sm text-gray-600">{d.operatorName}</div>
+                              </td>
+                              <td className="p-4">
+                                {d.imageUrl && (
+                                  <img src={d.imageUrl} alt="Bilde" className="w-12 h-12 object-cover rounded" />
+                                )}
                               </td>
                               <td className="p-4">
                                 <div className="flex gap-1">
@@ -2740,6 +2782,31 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                     className="w-full px-4 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all h-32 resize-none text-base leading-relaxed"
                     maxLength={500}
                   />
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">📷 Bilde</label>
+                  <div className="space-y-3">
+                    {editImageUrl && (
+                      <div>
+                        <img src={editImageUrl} alt="Eksisterende bilde" className="w-32 h-32 object-cover rounded-lg" />
+                        <p className="text-xs text-gray-500 mt-1">Nåværende bilde</p>
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setEditImage(e.target.files?.[0] || null)}
+                      className="w-full px-3 py-2 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => document.querySelector('input[type="file"]')?.click()}
+                      className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                    >
+                      📱 Velg fra galleri
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
