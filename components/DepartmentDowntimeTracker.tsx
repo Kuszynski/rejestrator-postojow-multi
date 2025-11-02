@@ -39,7 +39,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
   const [downtimeHistory, setDowntimeHistory] = useState<DowntimeEntry[]>([]);
   const [commentModal, setCommentModal] = useState<DowntimeEntry | null>(null);
   const [comment, setComment] = useState('');
-  const [view, setView] = useState(user.role === 'manager' || user.role === 'admin' ? 'overview' : 'main');
+  const [view, setView] = useState('today');
   const [loading, setLoading] = useState(true);
   const [postNumber, setPostNumber] = useState('');
   const [currentPostNumber, setCurrentPostNumber] = useState<string>('');
@@ -54,6 +54,12 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [departmentUsers, setDepartmentUsers] = useState([]);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [filteredHistory, setFilteredHistory] = useState([]);
+  const [newMachineName, setNewMachineName] = useState('');
+  const [editMachine, setEditMachine] = useState(null);
+  const [editMachineName, setEditMachineName] = useState('');
 
   const today = new Date().toISOString().split('T')[0];
   const yesterday = new Date();
@@ -93,7 +99,17 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     if (view === 'users' && department) {
       loadDepartmentUsers();
     }
-  }, [view, department]);
+    if (view === 'history') {
+      setFilteredHistory(downtimeHistory);
+    }
+  }, [view, department, downtimeHistory]);
+
+  // Filter history when dates change
+  useEffect(() => {
+    if (view === 'history') {
+      filterHistory();
+    }
+  }, [fromDate, toDate]);
 
   // Timer for active downtimes
   useEffect(() => {
@@ -417,6 +433,178 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     }
   };
 
+  const filterHistory = () => {
+    let filtered = downtimeHistory;
+    
+    if (fromDate) {
+      filtered = filtered.filter(d => {
+        const entryDate = new Date(d.endTime || d.startTime).toISOString().split('T')[0];
+        return entryDate >= fromDate;
+      });
+    }
+    
+    if (toDate) {
+      filtered = filtered.filter(d => {
+        const entryDate = new Date(d.endTime || d.startTime).toISOString().split('T')[0];
+        return entryDate <= toDate;
+      });
+    }
+    
+    setFilteredHistory(filtered);
+  };
+
+  const clearFilters = () => {
+    setFromDate('');
+    setToDate('');
+    setFilteredHistory(downtimeHistory);
+  };
+
+  const setYesterday = () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    setFromDate(yesterdayStr);
+    setToDate(yesterdayStr);
+  };
+
+  const exportJSONBackup = async () => {
+    try {
+      const backupData = {
+        downtimes: downtimeHistory,
+        machines: machines,
+        users: departmentUsers,
+        department: department,
+        exportDate: new Date().toISOString(),
+        version: '1.0'
+      };
+      
+      const jsonString = JSON.stringify(backupData, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `database-backup-${department?.name}-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert('Feil ved eksport av JSON backup');
+    }
+  };
+
+  const exportCSVBackup = () => {
+    try {
+      const csvContent = [
+        ['ID', 'Dato', 'Start Tid', 'Slutt Tid', 'Maskin', 'Varighet (min)', 'Årsak', 'Post Nr', 'Operatør', 'Avdeling'],
+        ...downtimeHistory.map(d => [
+          d.id,
+          new Date(d.startTime).toLocaleDateString('nb-NO'),
+          new Date(d.startTime).toLocaleTimeString('nb-NO'),
+          new Date(d.endTime).toLocaleTimeString('nb-NO'),
+          d.machineName,
+          d.duration,
+          d.comment,
+          d.postNumber || '',
+          d.operatorName,
+          department?.displayName || ''
+        ])
+      ].map(row => row.join(',')).join('\n');
+      
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `stanser-backup-${department?.name}-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert('Feil ved eksport av CSV backup');
+    }
+  };
+
+  const addMachine = async () => {
+    if (!newMachineName.trim()) {
+      alert('Vennligst skriv inn maskinnavn');
+      return;
+    }
+
+    try {
+      console.log('Adding machine:', {
+        name: newMachineName.trim(),
+        color: 'bg-blue-500',
+        department_id: user.departmentId
+      });
+
+      const { data, error } = await supabase
+        .from('machines')
+        .insert([{
+          id: `m${Date.now()}`,
+          name: newMachineName.trim(),
+          color: 'bg-blue-500',
+          department_id: user.departmentId
+        }])
+        .select();
+
+      if (error) {
+        console.error('Supabase error:', error);
+        alert(`Feil ved opprettelse av maskin: ${error.message}`);
+        return;
+      }
+
+      console.log('Machine created:', data);
+      setNewMachineName('');
+      loadMachines();
+      alert('Maskin opprettet!');
+    } catch (error) {
+      console.error('Unexpected error:', error);
+      alert(`Uventet feil ved opprettelse: ${error.message}`);
+    }
+  };
+
+  const updateMachine = async () => {
+    if (!editMachineName.trim()) {
+      alert('Maskinnavn kan ikke være tomt');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('machines')
+        .update({ name: editMachineName.trim() })
+        .eq('id', editMachine.id);
+
+      if (error) {
+        alert('Feil ved oppdatering');
+        return;
+      }
+
+      setEditMachine(null);
+      setEditMachineName('');
+      loadMachines();
+    } catch (error) {
+      alert('Uventet feil ved oppdatering');
+    }
+  };
+
+  const deleteMachine = async (machine) => {
+    if (confirm(`Vil du slette maskinen "${machine.name}"?\n\nViktig: Alle stanser knyttet til denne maskinen vil fortsatt være synlige i historikken.`)) {
+      try {
+        const { error } = await supabase
+          .from('machines')
+          .delete()
+          .eq('id', machine.id);
+
+        if (error) {
+          alert('Feil ved sletting');
+          return;
+        }
+
+        loadMachines();
+      } catch (error) {
+        alert('Uventet feil ved sletting');
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
@@ -506,6 +694,20 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
               Analyse i dag
             </button>
             
+            {(user.role === 'manager' || user.role === 'admin' || user.role === 'super') && (
+              <button
+                onClick={() => setView('yesterday')}
+                className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
+                  view === 'yesterday' 
+                    ? 'bg-white text-blue-600 shadow-lg' 
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+                }`}
+              >
+                <Calendar className="w-4 h-4" />
+                I går
+              </button>
+            )}
+            
             <button
               onClick={() => setView('ukerapport')}
               className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
@@ -521,18 +723,6 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
             {(user.role === 'manager' || user.role === 'admin' || user.role === 'super') && (
               <>
                 <button
-                  onClick={() => setView('overview')}
-                  className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
-                    view === 'overview' 
-                      ? 'bg-white text-blue-600 shadow-lg' 
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
-                  }`}
-                >
-                  <TrendingUp className="w-4 h-4" />
-                  Dashboard
-                </button>
-                
-                <button
                   onClick={() => setView('reports')}
                   className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
                     view === 'reports' 
@@ -545,15 +735,15 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                 </button>
                 
                 <button
-                  onClick={() => setView('live')}
+                  onClick={() => setView('history')}
                   className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
-                    view === 'live' 
+                    view === 'history' 
                       ? 'bg-white text-blue-600 shadow-lg' 
                       : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
                   }`}
                 >
-                  <Eye className="w-4 h-4" />
-                  Oversikt live
+                  <BarChart3 className="w-4 h-4" />
+                  📋 Historikk
                 </button>
                 
                 <button
@@ -569,15 +759,27 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                 </button>
                 
                 <button
-                  onClick={() => setView('yesterday')}
+                  onClick={() => setView('machines')}
                   className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
-                    view === 'yesterday' 
+                    view === 'machines' 
                       ? 'bg-white text-blue-600 shadow-lg' 
                       : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
                   }`}
                 >
-                  <Calendar className="w-4 h-4" />
-                  I går
+                  <Wrench className="w-4 h-4" />
+                  🏭 Maskiner
+                </button>
+                
+                <button
+                  onClick={() => setView('backup')}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
+                    view === 'backup' 
+                      ? 'bg-white text-blue-600 shadow-lg' 
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+                  }`}
+                >
+                  <Download className="w-4 h-4" />
+                  💾 Backup
                 </button>
               </>
             )}
@@ -2028,6 +2230,489 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                       <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium">🚨 Høy</span>
                       <span className="text-gray-600">Over 60 min</span>
                     </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {view === 'history' && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-slate-600 to-slate-700 rounded-2xl shadow-xl p-6 text-white">
+                <h2 className="text-2xl font-bold mb-2">📋 Stansehistorikk</h2>
+                <p className="text-slate-100">Detaljert oversikt over alle stanser</p>
+              </div>
+              
+              {/* Date Filters */}
+              <div className="bg-white rounded-xl p-6 shadow-lg">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Fra dato:</label>
+                    <input
+                      type="date"
+                      value={fromDate}
+                      onChange={(e) => setFromDate(e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-slate-500 focus:border-slate-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Til dato:</label>
+                    <input
+                      type="date"
+                      value={toDate}
+                      onChange={(e) => setToDate(e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-slate-500 focus:border-slate-500 transition-all"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={clearFilters}
+                      className="px-4 py-3 bg-gray-500 hover:bg-gray-600 text-white rounded-xl font-bold transition-all"
+                    >
+                      Tøm
+                    </button>
+                    <button
+                      onClick={setYesterday}
+                      className="px-4 py-3 bg-purple-500 hover:bg-purple-600 text-white rounded-xl font-bold transition-all"
+                    >
+                      I går
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        const csvContent = [
+                          ['Dato', 'Start Tid', 'Slutt Tid', 'Maskin', 'Varighet', 'Årsak', 'Operatør'],
+                          ...filteredHistory.map(d => [
+                            new Date(d.startTime).toLocaleDateString('nb-NO'),
+                            new Date(d.startTime).toLocaleTimeString('nb-NO'),
+                            new Date(d.endTime).toLocaleTimeString('nb-NO'),
+                            `${d.machineName}${d.postNumber ? `(Post ${d.postNumber})` : ''}`,
+                            `${d.duration} min`,
+                            d.comment,
+                            d.operatorName
+                          ])
+                        ].map(row => row.join(',')).join('\n');
+                        
+                        const blob = new Blob([csvContent], { type: 'text/csv' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `stansehistorikk-${fromDate || 'alle'}-${toDate || 'alle'}.csv`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="px-4 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold transition-all"
+                    >
+                      💾 Excel
+                    </button>
+                    <button 
+                      onClick={() => window.print()}
+                      className="px-4 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold transition-all"
+                    >
+                      📄 PDF
+                    </button>
+                  </div>
+                </div>
+              </div>
+              
+              {/* History Table */}
+              <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div className="bg-gray-50 p-4 border-b">
+                  <h3 className="text-lg font-bold text-gray-900">Stansehistorikk ({filteredHistory.length} stanser)</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left p-4 font-semibold text-gray-700">Dato</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Start Tid</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Slutt Tid</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Maskin</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Varighet</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Årsak</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Operatør</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredHistory.map((d, index) => {
+                        const machine = machines.find(m => m.name === d.machineName);
+                        return (
+                          <tr key={d.id} className="border-b hover:bg-gray-50">
+                            <td className="p-4">
+                              <span className="text-sm font-medium text-gray-900">
+                                {new Date(d.startTime).toLocaleDateString('nb-NO')}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <span className="text-sm text-gray-600">
+                                {new Date(d.startTime).toLocaleTimeString('nb-NO')}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <span className="text-sm text-gray-600">
+                                {new Date(d.endTime).toLocaleTimeString('nb-NO')}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-3 h-3 ${machine?.color || 'bg-gray-500'} rounded`}></div>
+                                <span className="font-medium text-gray-900">
+                                  {d.machineName}{d.postNumber ? `(Post ${d.postNumber})` : ''}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <span className={`px-2 py-1 rounded text-sm font-medium ${
+                                d.duration > 60 ? 'bg-red-100 text-red-800' :
+                                d.duration > 30 ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-green-100 text-green-800'
+                              }`}>
+                                {d.duration} min
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <div className="text-sm text-gray-700 max-w-xs">
+                                {d.comment}
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <span className="text-sm text-gray-600">{d.operatorName}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              
+              {/* Machine Statistics */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                  <div className="bg-gray-50 p-4 border-b">
+                    <h3 className="text-lg font-bold text-gray-900">📊 Stanser per maskin</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-gray-50 border-b">
+                          <th className="text-left p-3 font-semibold text-gray-700">Maskin</th>
+                          <th className="text-left p-3 font-semibold text-gray-700">Antall</th>
+                          <th className="text-left p-3 font-semibold text-gray-700">Total</th>
+                          <th className="text-left p-3 font-semibold text-gray-700">%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const machineStats = {};
+                          const totalDuration = filteredHistory.reduce((sum, d) => sum + d.duration, 0);
+                          
+                          filteredHistory.forEach(d => {
+                            if (!machineStats[d.machineName]) {
+                              machineStats[d.machineName] = { count: 0, duration: 0 };
+                            }
+                            machineStats[d.machineName].count += 1;
+                            machineStats[d.machineName].duration += d.duration;
+                          });
+                          
+                          return Object.entries(machineStats)
+                            .sort(([,a], [,b]) => b.duration - a.duration)
+                            .slice(0, 10)
+                            .map(([machineName, stats]) => {
+                              const percentage = totalDuration > 0 ? ((stats.duration / totalDuration) * 100).toFixed(1) : '0.0';
+                              const machine = machines.find(m => m.name === machineName);
+                              return (
+                                <tr key={machineName} className="border-b hover:bg-gray-50">
+                                  <td className="p-3">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-3 h-3 ${machine?.color || 'bg-gray-500'} rounded`}></div>
+                                      <span className="font-medium text-gray-900">{machineName}</span>
+                                    </div>
+                                  </td>
+                                  <td className="p-3">
+                                    <span className="text-gray-900">{stats.count} stanser</span>
+                                  </td>
+                                  <td className="p-3">
+                                    <span className="font-bold text-gray-900">{stats.duration} min</span>
+                                  </td>
+                                  <td className="p-3">
+                                    <span className="text-blue-600 font-medium">{percentage}%</span>
+                                  </td>
+                                </tr>
+                              );
+                            });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                  <div className="bg-gray-50 p-4 border-b">
+                    <h3 className="text-lg font-bold text-gray-900">📝 Årsaker per maskin</h3>
+                  </div>
+                  <div className="p-4 max-h-96 overflow-y-auto">
+                    {(() => {
+                      const machineReasons = {};
+                      
+                      filteredHistory.forEach(d => {
+                        if (!machineReasons[d.machineName]) {
+                          machineReasons[d.machineName] = { count: 0, duration: 0, reasons: {} };
+                        }
+                        machineReasons[d.machineName].count += 1;
+                        machineReasons[d.machineName].duration += d.duration;
+                        
+                        if (!machineReasons[d.machineName].reasons[d.comment]) {
+                          machineReasons[d.machineName].reasons[d.comment] = 0;
+                        }
+                        machineReasons[d.machineName].reasons[d.comment] += 1;
+                      });
+                      
+                      return Object.entries(machineReasons)
+                        .sort(([,a], [,b]) => b.duration - a.duration)
+                        .slice(0, 5)
+                        .map(([machineName, data]) => (
+                          <div key={machineName} className="mb-4">
+                            <h4 className="font-bold text-gray-900 mb-2">
+                              {machineName}({data.count} stanser, {data.duration} min)
+                            </h4>
+                            <div className="ml-4 space-y-1">
+                              {Object.entries(data.reasons)
+                                .sort(([,a], [,b]) => b - a)
+                                .slice(0, 3)
+                                .map(([reason, count]) => (
+                                  <div key={reason} className="text-sm text-gray-600">
+                                    {reason} ({count}x)
+                                  </div>
+                                ))
+                              }
+                            </div>
+                          </div>
+                        ));
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {view === 'backup' && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl shadow-xl p-6 text-white">
+                <h2 className="text-2xl font-bold mb-2">💾 Database Backup</h2>
+                <p className="text-blue-100">Eksporter og sikkerhetskopier data</p>
+              </div>
+              
+              {/* Export Options */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white rounded-xl p-6 shadow-lg">
+                  <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
+                    <Download className="w-6 h-6 text-green-600" />
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">📊 Eksporter alle data</h3>
+                  <p className="text-gray-600 text-sm mb-4">Last ned alle stanser, maskiner og brukere som JSON fil</p>
+                  <button 
+                    onClick={exportJSONBackup}
+                    className="w-full px-4 py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold transition-colors"
+                  >
+                    💾 Last ned JSON backup
+                  </button>
+                </div>
+                
+                <div className="bg-white rounded-xl p-6 shadow-lg">
+                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
+                    <BarChart3 className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">📋 Eksporter stanser (CSV)</h3>
+                  <p className="text-gray-600 text-sm mb-4">Last ned alle stanser som Excel-kompatibel CSV fil</p>
+                  <button 
+                    onClick={exportCSVBackup}
+                    className="w-full px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-bold transition-colors"
+                  >
+                    📊 Last ned CSV backup
+                  </button>
+                </div>
+              </div>
+              
+              {/* Important Information */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-lg font-bold text-yellow-800 mb-3">⚠️ Viktig informasjon</h3>
+                    <ul className="space-y-2 text-yellow-700">
+                      <li className="flex items-start gap-2">
+                        <span className="w-1.5 h-1.5 bg-yellow-600 rounded-full mt-2 flex-shrink-0"></span>
+                        <span>JSON backup inneholder alle data og kan brukes til gjenoppretting</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="w-1.5 h-1.5 bg-yellow-600 rounded-full mt-2 flex-shrink-0"></span>
+                        <span>CSV backup er kun for analyse i Excel/Google Sheets</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="w-1.5 h-1.5 bg-yellow-600 rounded-full mt-2 flex-shrink-0"></span>
+                        <span>For full database backup, bruk Supabase Dashboard</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="w-1.5 h-1.5 bg-yellow-600 rounded-full mt-2 flex-shrink-0"></span>
+                        <span>Lagre backup filer på sikker plass</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Database Statistics */}
+              <div className="bg-white rounded-xl p-6 shadow-lg">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">📈 Database statistikk</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="text-center p-4 bg-blue-50 rounded-lg">
+                    <div className="text-3xl font-bold text-blue-600">{downtimeHistory.length}</div>
+                    <div className="text-sm text-blue-700 font-medium">Totalt stanser</div>
+                  </div>
+                  <div className="text-center p-4 bg-green-50 rounded-lg">
+                    <div className="text-3xl font-bold text-green-600">{machines.length}</div>
+                    <div className="text-sm text-green-700 font-medium">Maskiner</div>
+                  </div>
+                  <div className="text-center p-4 bg-purple-50 rounded-lg">
+                    <div className="text-3xl font-bold text-purple-600">{departmentUsers.length}</div>
+                    <div className="text-sm text-purple-700 font-medium">Brukere</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {view === 'machines' && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-orange-600 to-orange-700 rounded-2xl shadow-xl p-6 text-white">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h2 className="text-2xl font-bold mb-2">🏭 Maskinadministrasjon</h2>
+                    <p className="text-orange-100">Administrer maskiner som kan registreres for stanser</p>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-bold">{machines.length}</div>
+                    <div className="text-orange-100 text-sm">Totalt maskiner</div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Add New Machine */}
+              <div className="bg-white rounded-xl p-6 shadow-lg">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">Legg til maskin</h3>
+                <div className="flex gap-4">
+                  <input
+                    type="text"
+                    value={newMachineName}
+                    onChange={(e) => setNewMachineName(e.target.value)}
+                    placeholder="Maskinnavn"
+                    className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all"
+                  />
+                  <button
+                    onClick={addMachine}
+                    className="px-6 py-3 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-xl font-bold transition-all"
+                  >
+                    ➕ Legg til
+                  </button>
+                </div>
+              </div>
+              
+              {/* Machines List */}
+              <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left p-4 font-semibold text-gray-700">#</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Maskinnavn</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Handlinger</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {machines.map((machine, index) => (
+                        <tr key={machine.id} className="border-b hover:bg-gray-50">
+                          <td className="p-4">
+                            <div className={`w-8 h-8 ${machine.color} text-white rounded-lg flex items-center justify-center font-semibold text-sm`}>
+                              {index + 1}
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div>
+                              <div className="font-medium text-gray-900">{machine.name}</div>
+                              <div className="text-sm text-gray-500">ID: {machine.id}</div>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => {
+                                  setEditMachine(machine);
+                                  setEditMachineName(machine.name);
+                                }}
+                                className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm font-medium transition-colors"
+                              >
+                                Rediger
+                              </button>
+                              <button
+                                onClick={() => deleteMachine(machine)}
+                                className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-medium transition-colors"
+                              >
+                                Slett
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit Machine Modal */}
+          {editMachine && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
+                <div className="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-6 rounded-t-2xl">
+                  <h2 className="text-xl font-bold mb-2">✏️ Rediger maskin</h2>
+                  <p className="text-orange-100">ID: {editMachine.id}</p>
+                </div>
+
+                <div className="p-6">
+                  <div className="mb-4">
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Maskinnavn *</label>
+                    <input
+                      type="text"
+                      value={editMachineName}
+                      onChange={(e) => setEditMachineName(e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all text-lg"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <button
+                      onClick={updateMachine}
+                      className="w-full px-6 py-4 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-xl transition-all duration-200 font-bold text-lg"
+                    >
+                      ✅ LAGRE ENDRINGER
+                    </button>
+                    
+                    <button
+                      onClick={() => {
+                        setEditMachine(null);
+                        setEditMachineName('');
+                      }}
+                      className="w-full px-6 py-3 border-2 border-gray-300 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium text-gray-700"
+                    >
+                      ❌ Avbryt
+                    </button>
                   </div>
                 </div>
               </div>

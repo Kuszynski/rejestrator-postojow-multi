@@ -3,11 +3,495 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User, Department, getDepartments, createDepartment, addUser, getDepartmentUsers } from '@/lib/auth';
-import { Building2, Users, Plus, Settings, BarChart3, Shield, Trash2, Edit2 } from 'lucide-react';
+import { Building2, Users, Plus, Settings, BarChart3, Shield, Trash2, Edit2, AlertCircle, CheckCircle, TrendingUp } from 'lucide-react';
 
 interface SuperAdminPanelProps {
   user: User;
   onLogout: () => void;
+}
+
+// Factory Analytics Component
+function FactoryAnalytics({ departments }: { departments: Department[] }) {
+  const [analyticsData, setAnalyticsData] = useState<any>({
+    today: [],
+    week: [],
+    month: [],
+    departmentStats: [],
+    topMachines: [],
+    topReasons: [],
+    trends: []
+  });
+  const [loading, setLoading] = useState(true);
+  const [timeRange, setTimeRange] = useState('today');
+
+  useEffect(() => {
+    loadAnalyticsData();
+    const interval = setInterval(loadAnalyticsData, 30000); // Update every 30 seconds
+    return () => clearInterval(interval);
+  }, [departments]);
+
+  const loadAnalyticsData = async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      const monthAgo = new Date();
+      monthAgo.setMonth(monthAgo.getMonth() - 1);
+
+      // Get all downtimes with department info
+      const { data: allDowntimes, error } = await supabase
+        .from('downtimes')
+        .select(`
+          *,
+          departments(display_name)
+        `)
+        .gte('date', monthAgo.toISOString().split('T')[0])
+        .order('start_time', { ascending: false });
+
+      if (error) throw error;
+
+      // Get machines data
+      const { data: machines } = await supabase.from('machines').select('*');
+      const machineMap = {};
+      machines?.forEach(m => {
+        machineMap[m.id] = m.name;
+      });
+
+      // Enrich data
+      const enrichedData = allDowntimes?.map(d => ({
+        ...d,
+        machineName: machineMap[d.machine_id] || d.machine_id,
+        departmentName: d.departments?.display_name || 'Ukjent'
+      })) || [];
+
+      // Filter by time ranges
+      const todayData = enrichedData.filter(d => d.date === today);
+      const weekData = enrichedData.filter(d => new Date(d.date) >= weekAgo);
+      const monthData = enrichedData;
+
+      // Calculate department stats
+      const deptStats = departments.map(dept => {
+        const deptDowntimes = todayData.filter(d => d.department_id === dept.id);
+        const totalDuration = deptDowntimes.reduce((sum, d) => sum + d.duration, 0);
+        const efficiency = Math.max(0, 100 - Math.round((totalDuration / 480) * 100)); // 8h = 480min
+        
+        return {
+          department: dept,
+          downtimeCount: deptDowntimes.length,
+          totalDuration,
+          efficiency,
+          avgDuration: deptDowntimes.length > 0 ? Math.round(totalDuration / deptDowntimes.length) : 0
+        };
+      });
+
+      // Top machines by downtime
+      const machineStats = {};
+      todayData.forEach(d => {
+        if (!machineStats[d.machineName]) {
+          machineStats[d.machineName] = { count: 0, duration: 0, department: d.departmentName };
+        }
+        machineStats[d.machineName].count++;
+        machineStats[d.machineName].duration += d.duration;
+      });
+
+      const topMachines = Object.entries(machineStats)
+        .sort(([,a], [,b]) => b.duration - a.duration)
+        .slice(0, 10)
+        .map(([name, stats]) => ({ name, ...stats }));
+
+      // Top reasons
+      const reasonStats = {};
+      todayData.forEach(d => {
+        const reason = d.comment.toLowerCase();
+        if (!reasonStats[reason]) {
+          reasonStats[reason] = { count: 0, duration: 0, machines: new Set(), departments: new Set() };
+        }
+        reasonStats[reason].count++;
+        reasonStats[reason].duration += d.duration;
+        reasonStats[reason].machines.add(d.machineName);
+        reasonStats[reason].departments.add(d.departmentName);
+      });
+
+      const topReasons = Object.entries(reasonStats)
+        .sort(([,a], [,b]) => b.count - a.count)
+        .slice(0, 10)
+        .map(([reason, stats]) => ({ 
+          reason, 
+          count: stats.count,
+          duration: stats.duration,
+          machines: Array.from(stats.machines).join(', '),
+          departments: Array.from(stats.departments).join(', ')
+        }));
+
+      // Weekly trends (last 7 days)
+      const trends = [];
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toISOString().split('T')[0];
+        const dayData = enrichedData.filter(d => d.date === dateStr);
+        
+        trends.push({
+          date: dateStr,
+          day: date.toLocaleDateString('nb-NO', { weekday: 'short' }),
+          downtimes: dayData.length,
+          duration: dayData.reduce((sum, d) => sum + d.duration, 0)
+        });
+      }
+
+      setAnalyticsData({
+        today: todayData,
+        week: weekData,
+        month: monthData,
+        departmentStats: deptStats,
+        topMachines,
+        topReasons,
+        trends
+      });
+      setLoading(false);
+    } catch (error) {
+      console.error('Error loading analytics:', error);
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-xl text-gray-600">Laster analysedata...</div>
+      </div>
+    );
+  }
+
+  const { today, departmentStats, topMachines, topReasons, trends } = analyticsData;
+  const totalDowntimes = today.length;
+  const totalDuration = today.reduce((sum, d) => sum + d.duration, 0);
+  const avgDuration = totalDowntimes > 0 ? Math.round(totalDuration / totalDowntimes) : 0;
+  const overallEfficiency = Math.max(0, 100 - Math.round((totalDuration / (480 * departments.length)) * 100));
+
+  return (
+    <div className="space-y-6">
+      {/* Department Performance */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">📊 Avdelingsytelse i dag</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avdeling</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stanser</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stansetid</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gjennomsnitt</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Effektivitet</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {departmentStats.map((stat) => (
+                <tr key={stat.department.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">
+                    {stat.department.displayName}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {stat.downtimeCount}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {stat.totalDuration} min
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {stat.avgDuration} min
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`px-2 py-1 text-xs rounded-full font-medium ${
+                      stat.efficiency >= 90 ? 'bg-green-100 text-green-800' :
+                      stat.efficiency >= 75 ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-red-100 text-red-800'
+                    }`}>
+                      {stat.efficiency}%
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {stat.efficiency >= 90 ? '🟢 Utmerket' :
+                     stat.efficiency >= 75 ? '🟡 Bra' : '🔴 Trenger oppmerksomhet'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="bg-gray-50 p-4 border-t">
+          <h4 className="text-sm font-semibold text-gray-700 mb-3">Status forklaring:</h4>
+          <div className="space-y-2 text-xs">
+            <div className="flex items-start gap-3">
+              <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium flex-shrink-0">🟢 Utmerket</span>
+              <div className="text-gray-600">
+                <div className="font-medium">Effektivitet 90-100%</div>
+                <div>Avdelingen fungerer optimalt med minimal stansetid. Fortsett det gode arbeidet.</div>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium flex-shrink-0">🟡 Bra</span>
+              <div className="text-gray-600">
+                <div className="font-medium">Effektivitet 75-89%</div>
+                <div>Akseptabel ytelse, men det er rom for forbedring. Vurder å identifisere hovedproblemer.</div>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium flex-shrink-0">🔴 Trenger oppmerksomhet</span>
+              <div className="text-gray-600">
+                <div className="font-medium">Effektivitet under 75%</div>
+                <div>Kritisk nivå - krever umiddelbar handling. Analyser årsaker og implementer tiltak.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
+        {/* Top Machines */}
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900">🏭 Mest problematiske maskiner</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Maskin</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avdeling</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total tid</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Antall</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {topMachines.slice(0, 8).map((machine, index) => (
+                  <tr key={machine.name} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                        index === 0 ? 'bg-red-500' :
+                        index === 1 ? 'bg-orange-500' :
+                        index === 2 ? 'bg-yellow-500' : 'bg-gray-400'
+                      }`}>
+                        {index + 1}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-medium text-gray-900">{machine.name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{machine.department}</td>
+                    <td className="px-4 py-3 font-bold text-gray-900">{machine.duration} min</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{machine.count} stanser</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Top Reasons */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">🔍 Hyppigste årsaker til stanser</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Årsak</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Maskin</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avdeling</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Antall</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total tid</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gjennomsnitt</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {topReasons.map((reason, index) => (
+                <tr key={reason.reason} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                      index === 0 ? 'bg-red-500' :
+                      index === 1 ? 'bg-orange-500' :
+                      index === 2 ? 'bg-yellow-500' : 'bg-gray-400'
+                    }`}>
+                      {index + 1}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="text-sm font-medium text-gray-900 capitalize">
+                      {reason.reason}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="text-sm text-gray-600">
+                      {reason.machines}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="text-sm text-gray-600">
+                      {reason.departments}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {reason.count}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {reason.duration} min
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {Math.round(reason.duration / reason.count)} min
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Live All Downtimes Component
+function LiveAllDowntimes() {
+  const [allTodayDowntimes, setAllTodayDowntimes] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadAllTodayDowntimes();
+    const interval = setInterval(loadAllTodayDowntimes, 5000); // Refresh every 5 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadAllTodayDowntimes = async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('downtimes')
+        .select(`
+          *,
+          departments(display_name)
+        `)
+        .eq('date', today)
+        .order('start_time', { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.error('Error loading all today downtimes:', error);
+        return;
+      }
+
+      const machineList = await supabase.from('machines').select('*');
+      const machines = machineList.data || [];
+
+      const enrichedData = (data || []).map(d => ({
+        ...d,
+        machineName: machines.find(m => m.id === d.machine_id)?.name || d.machine_id,
+        departmentName: d.departments?.display_name || 'Ukjent avdeling'
+      }));
+
+      setAllTodayDowntimes(enrichedData);
+    } catch (error) {
+      console.error('Error loading all today downtimes:', error);
+    }
+    if (loading) setLoading(false);
+  };
+
+
+
+  return (
+    <div className="bg-white rounded-lg shadow">
+      <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-red-50 to-orange-50">
+        <div className="flex justify-between items-center">
+          <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+            <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+            🔴 Live - Alle dagens stanser
+          </h3>
+          <div className="flex items-center gap-4">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-red-600">{allTodayDowntimes.length}</div>
+              <div className="text-xs text-gray-600">Totalt stanser</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-orange-600">
+                {allTodayDowntimes.reduce((sum, d) => sum + d.duration, 0)}
+              </div>
+              <div className="text-xs text-gray-600">Min total</div>
+            </div>
+            <div className="text-xs text-gray-500">
+              Oppdateres hvert 5. sekund
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {allTodayDowntimes.length === 0 ? (
+        <div className="p-6 text-center text-gray-500">
+          <p>Ingen stanser registrert i dag</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="p-3 text-left font-semibold">Tid</th>
+                <th className="p-3 text-left font-semibold">Avdeling</th>
+                <th className="p-3 text-left font-semibold">Maskin</th>
+                <th className="p-3 text-left font-semibold">Varighet</th>
+                <th className="p-3 text-left font-semibold">Årsak</th>
+                <th className="p-3 text-left font-semibold">Operatør</th>
+                <th className="p-3 text-left font-semibold">Post Nr</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allTodayDowntimes.map((d) => (
+                <tr key={d.id} className="border-b hover:bg-gray-50">
+                  <td className="p-3">
+                    <span className="text-sm font-medium">
+                      {new Date(d.start_time).toLocaleDateString('nb-NO')} {new Date(d.start_time).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </td>
+                  <td className="p-3">
+                    <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                      {d.departmentName}
+                    </span>
+                  </td>
+                  <td className="p-3 font-medium">{d.machineName}</td>
+                  <td className="p-3">
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                      d.duration > 60 ? 'bg-red-100 text-red-800' :
+                      d.duration > 30 ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-green-100 text-green-800'
+                    }`}>
+                      {d.duration} min
+                    </span>
+                  </td>
+                  <td className="p-3">
+                    <div className="max-w-xs truncate" title={d.comment}>
+                      {d.comment}
+                    </div>
+                  </td>
+                  <td className="p-3 text-gray-600">{d.operator_id}</td>
+                  <td className="p-3">
+                    {d.post_number ? (
+                      <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs">
+                        {d.post_number}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 text-xs">-</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Live Department Overview Component
@@ -45,21 +529,13 @@ function LiveDepartmentOverview({ department }: { department: Department }) {
       }));
 
       setTodayDowntimes(enrichedData);
-      setLoading(false);
     } catch (error) {
       console.error('Error loading today downtimes:', error);
-      setLoading(false);
     }
+    if (loading) setLoading(false);
   };
 
-  if (loading) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-bold mb-4">{department.displayName}</h3>
-        <p className="text-gray-500">Laster...</p>
-      </div>
-    );
-  }
+
 
   const machineStats = {};
   todayDowntimes.forEach(d => {
@@ -400,6 +876,9 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       <div className="max-w-7xl mx-auto px-4 py-8">
         {view === 'live' && (
           <div className="space-y-6">
+            {/* Real-time All Downtimes */}
+            <LiveAllDowntimes />
+            
             {departments.map(dept => (
               <LiveDepartmentOverview key={dept.id} department={dept} />
             ))}
@@ -852,35 +1331,33 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={async () => {
-                                if (user.role === 'superadmin') {
-                                  alert('Kan ikke slette superadmin');
-                                  return;
-                                }
-                                if (confirm(`Er du sikker på at du vil slette bruker "${user.name}"?`)) {
-                                  try {
-                                    const { error } = await supabase
-                                      .from('user_passwords')
-                                      .delete()
-                                      .eq('user_id', user.id);
-                                    
-                                    if (error) {
-                                      alert('Feil: ' + error.message);
-                                    } else {
-                                      alert('Bruker slettet!');
-                                      loadAllUsers();
+                            {user.role !== 'super' && (
+                              <button
+                                onClick={async () => {
+                                  if (confirm(`Er du sikker på at du vil slette bruker "${user.name}"?`)) {
+                                    try {
+                                      const { error } = await supabase
+                                        .from('user_passwords')
+                                        .delete()
+                                        .eq('user_id', user.id);
+                                      
+                                      if (error) {
+                                        alert('Feil: ' + error.message);
+                                      } else {
+                                        alert('Bruker slettet!');
+                                        loadAllUsers();
+                                      }
+                                    } catch (err) {
+                                      alert('Feil ved sletting');
                                     }
-                                  } catch (err) {
-                                    alert('Feil ved sletting');
                                   }
-                                }
-                              }}
-                              className="text-red-600 hover:text-red-800"
-                              title="Slett bruker"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                                }}
+                                className="text-red-600 hover:text-red-800"
+                                title="Slett bruker"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -893,65 +1370,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         )}
 
         {view === 'analytics' && (
-          <div className="space-y-8">
-            <div className="bg-white rounded-lg shadow">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-900">Sammenligning mellom avdelinger</h2>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Avdeling
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Brukere
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Maskiner
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Stanser
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Stansetid (min)
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Gjennomsnitt
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {departmentStats.map((stat) => (
-                      <tr key={stat.department.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">
-                            {stat.department.displayName}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {stat.userCount}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {stat.machineCount}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {stat.downtimeCount}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {stat.totalDowntime}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {stat.downtimeCount > 0 ? Math.round(stat.totalDowntime / stat.downtimeCount) : 0} min
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
+          <FactoryAnalytics departments={departments} />
         )}
       </div>
     </div>
