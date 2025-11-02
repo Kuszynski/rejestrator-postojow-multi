@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { FileText, Download, Mail, Calendar, TrendingDown, BarChart3 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 interface DowntimeEntry {
   id: string;
@@ -36,16 +37,45 @@ export default function ReportSystem() {
   });
 
   useEffect(() => {
-    const stored = localStorage.getItem('downtimeHistory');
-    if (stored) {
-      setDowntimeHistory(JSON.parse(stored));
-    }
-
+    loadDowntimeData();
+    
     const emailSettingsStored = localStorage.getItem('emailSettings');
     if (emailSettingsStored) {
       setEmailSettings(JSON.parse(emailSettingsStored));
     }
   }, []);
+
+  const loadDowntimeData = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('downtimes')
+        .select('*')
+        .order('start_time', { ascending: false });
+
+      if (error) {
+        console.error('Error loading downtimes:', error);
+        return;
+      }
+
+      const machines = await supabase.from('machines').select('*');
+      const machineList = machines.data || [];
+      
+      const enrichedData = (data || []).map(downtime => ({
+        id: downtime.id,
+        machineName: machineList.find(m => m.id === downtime.machine_id)?.name || 'Unknown',
+        operatorName: downtime.operator_id,
+        startTime: downtime.start_time,
+        duration: downtime.duration,
+        comment: downtime.comment,
+        date: downtime.date || new Date(downtime.start_time).toISOString().split('T')[0],
+        postNumber: downtime.post_number
+      }));
+
+      setDowntimeHistory(enrichedData);
+    } catch (error) {
+      console.error('Unexpected error loading data:', error);
+    }
+  };
 
   const generateReportData = (): ReportData => {
     let filteredData: DowntimeEntry[] = [];
