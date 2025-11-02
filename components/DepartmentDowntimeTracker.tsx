@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { User, Department, hasPermission } from '@/lib/auth';
+import { User, Department, hasPermission, getDepartmentUsers, addUser } from '@/lib/auth';
 import { Play, Pause, Clock, TrendingUp, BarChart3, Calendar, LogOut, AlertCircle, CheckCircle, Edit2, Trash2, Eye, Download, Wrench, Building2 } from 'lucide-react';
 
 interface Machine {
@@ -51,11 +51,23 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
   const [editStartTime, setEditStartTime] = useState('');
   const [editEndTime, setEditEndTime] = useState('');
   const [editMinutes, setEditMinutes] = useState('');
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [departmentUsers, setDepartmentUsers] = useState([]);
 
   const today = new Date().toISOString().split('T')[0];
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+  
   const todayDowntimes = downtimeHistory.filter(d => {
     const endDate = d.endTime ? new Date(d.endTime).toISOString().split('T')[0] : today;
     return endDate === today;
+  });
+  
+  const yesterdayDowntimes = downtimeHistory.filter(d => {
+    const endDate = d.endTime ? new Date(d.endTime).toISOString().split('T')[0] : yesterdayStr;
+    return endDate === yesterdayStr;
   });
 
   useEffect(() => {
@@ -65,6 +77,23 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
       });
     }
   }, [department, user]);
+
+  // Real-time updates for manager view
+  useEffect(() => {
+    if (department && (user.role === 'manager' || user.role === 'admin' || user.role === 'super_admin')) {
+      const interval = setInterval(() => {
+        loadData();
+      }, 5000); // Update every 5 seconds
+      return () => clearInterval(interval);
+    }
+  }, [department, user.role]);
+
+  // Load users when view changes to users
+  useEffect(() => {
+    if (view === 'users' && department) {
+      loadDepartmentUsers();
+    }
+  }, [view, department]);
 
   // Timer for active downtimes
   useEffect(() => {
@@ -342,6 +371,52 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     }
   };
 
+  const loadDepartmentUsers = async () => {
+    try {
+      const users = await getDepartmentUsers(user.departmentId);
+      setDepartmentUsers(users);
+    } catch (error) {
+      console.error('Unexpected error loading users:', error);
+    }
+  };
+
+  const addNewUser = async () => {
+    if (!newUsername.trim() || !newPassword.trim()) {
+      alert('Vennligst fyll ut alle felt');
+      return;
+    }
+
+    const result = await addUser(newUsername.trim(), newPassword.trim(), user.departmentId, 'operator');
+    
+    if (result.success) {
+      setNewUsername('');
+      setNewPassword('');
+      loadDepartmentUsers();
+      alert('Bruker opprettet!');
+    } else {
+      alert(result.error);
+    }
+  };
+
+  const deleteUser = async (userId: string) => {
+    if (confirm(`Vil du slette brukeren ${userId}?`)) {
+      try {
+        const { error } = await supabase
+          .from('user_passwords')
+          .delete()
+          .eq('user_id', userId);
+        
+        if (error) {
+          alert('Feil ved sletting');
+        } else {
+          loadDepartmentUsers();
+        }
+      } catch (error) {
+        alert('Uventet feil ved sletting');
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
@@ -355,22 +430,22 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     <div className="h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex flex-col overflow-hidden">
       <div className="flex-1 flex flex-col px-2 py-2">
         {/* Modern Header */}
-        <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg border border-white/20 p-4 mb-4 flex-shrink-0">
+        <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl shadow-xl border border-slate-700 p-4 mb-4 flex-shrink-0">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <Building2 className="w-8 h-8 text-blue-600" />
               <div>
-                <h1 className="text-xl font-bold text-gray-900 mb-1">
+                <h1 className="text-xl font-bold text-white mb-1">
                   {department?.displayName} - {user.name}
                 </h1>
-                <p className="text-gray-600 text-sm">Klar for å registrere stanser</p>
+                <p className="text-slate-300 text-sm">Klar for å registrere stanser</p>
               </div>
             </div>
             
             <div className="flex items-center gap-3">
               <button
                 onClick={onLogout}
-                className="px-3 py-1 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm transition-colors"
+                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm transition-colors rounded-lg shadow-md"
               >
                 ✕ Logg ut
               </button>
@@ -411,7 +486,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
               }`}
             >
               <Eye className="w-4 h-4" />
-              <span>I dag</span>
+              <span>I dag </span>
               {todayDowntimes.length > 0 && (
                 <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
                   {todayDowntimes.length}
@@ -468,6 +543,42 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                   <BarChart3 className="w-4 h-4" />
                   Rapporter
                 </button>
+                
+                <button
+                  onClick={() => setView('live')}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
+                    view === 'live' 
+                      ? 'bg-white text-blue-600 shadow-lg' 
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+                  }`}
+                >
+                  <Eye className="w-4 h-4" />
+                  Oversikt live
+                </button>
+                
+                <button
+                  onClick={() => setView('users')}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
+                    view === 'users' 
+                      ? 'bg-white text-blue-600 shadow-lg' 
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+                  }`}
+                >
+                  <Building2 className="w-4 h-4" />
+                  Brukere
+                </button>
+                
+                <button
+                  onClick={() => setView('yesterday')}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
+                    view === 'yesterday' 
+                      ? 'bg-white text-blue-600 shadow-lg' 
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+                  }`}
+                >
+                  <Calendar className="w-4 h-4" />
+                  I går
+                </button>
               </>
             )}
           </div>
@@ -477,14 +588,14 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
           {view === 'main' && (
             <>
               {activeDowntimes.length > 0 && (
-                <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg border border-white/20 p-4 mb-4">
+                <div className="bg-gradient-to-r from-red-600 to-red-700 rounded-2xl shadow-xl border border-red-500 p-4 mb-4">
                   <div className="flex items-center gap-2 mb-4">
                     <div className="w-8 h-8 bg-red-500 rounded-xl flex items-center justify-center">
                       <AlertCircle className="w-4 h-4 text-white" />
                     </div>
                     <div>
-                      <h2 className="text-lg font-bold text-gray-900">Aktive stanser</h2>
-                      <p className="text-gray-600 text-sm">Trykk for å avslutte stans</p>
+                      <h2 className="text-lg font-bold text-white">Aktive stanser</h2>
+                      <p className="text-red-100 text-sm">Trykk for å avslutte stans</p>
                     </div>
                   </div>
                   <div className="grid gap-3">
@@ -867,18 +978,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                     <h2 className="text-2xl font-bold mb-2">Uke rapport</h2>
                     <div className="flex items-center gap-4">
                       <div className="text-center">
-                        <div className="text-2xl font-bold">{downtimeHistory.filter(d => {
-                          const weekStart = new Date();
-                          weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-                          const weekEnd = new Date(weekStart);
-                          weekEnd.setDate(weekEnd.getDate() + 6);
-                          const entryDate = new Date(d.endTime || d.startTime);
-                          return entryDate >= weekStart && entryDate <= weekEnd;
-                        }).length}</div>
-                        <div className="text-purple-100 text-sm">stanser</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold">{downtimeHistory.filter(d => {
+                        <div className="text-2xl font-bold">{(() => {
                           const today = new Date();
                           const weekStart = new Date(today);
                           const dayOfWeek = today.getDay();
@@ -886,9 +986,27 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                           weekStart.setDate(today.getDate() + daysToMonday);
                           const weekEnd = new Date(weekStart);
                           weekEnd.setDate(weekEnd.getDate() + 6);
-                          const entryDate = new Date(d.endTime || d.startTime);
-                          return entryDate >= weekStart && entryDate <= weekEnd;
-                        }).reduce((sum, d) => sum + d.duration, 0)}</div>
+                          return downtimeHistory.filter(d => {
+                            const entryDate = new Date(d.endTime || d.startTime);
+                            return entryDate >= weekStart && entryDate <= weekEnd;
+                          }).length;
+                        })()}</div>
+                        <div className="text-purple-100 text-sm">stanser</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold">{(() => {
+                          const today = new Date();
+                          const weekStart = new Date(today);
+                          const dayOfWeek = today.getDay();
+                          const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                          weekStart.setDate(today.getDate() + daysToMonday);
+                          const weekEnd = new Date(weekStart);
+                          weekEnd.setDate(weekEnd.getDate() + 6);
+                          return downtimeHistory.filter(d => {
+                            const entryDate = new Date(d.endTime || d.startTime);
+                            return entryDate >= weekStart && entryDate <= weekEnd;
+                          }).reduce((sum, d) => sum + d.duration, 0);
+                        })()}</div>
                         <div className="text-purple-100 text-sm">min total</div>
                       </div>
                       <div className="flex gap-2">
@@ -1200,6 +1318,280 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
             </div>
           )}
 
+          {view === 'live' && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-2xl shadow-xl p-6 text-white">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
+                      <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                      📡 Oversikt live - {department?.displayName}
+                    </h2>
+                    <p className="text-green-100">Sanntidsovervåking av produksjonen</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm text-green-100">Sist oppdatert:</div>
+                    <div className="text-lg font-bold">{new Date().toLocaleTimeString('nb-NO')}</div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Live Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="bg-white rounded-xl p-6 shadow-lg border-l-4 border-blue-500">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-600 text-sm">Aktive stanser</p>
+                      <p className="text-3xl font-bold text-blue-600">{activeDowntimes.length}</p>
+                    </div>
+                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <AlertCircle className="w-6 h-6 text-blue-600" />
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-xl p-6 shadow-lg border-l-4 border-green-500">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-600 text-sm">Maskiner i drift</p>
+                      <p className="text-3xl font-bold text-green-600">{machines.length - activeDowntimes.length}</p>
+                    </div>
+                    <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                      <CheckCircle className="w-6 h-6 text-green-600" />
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-xl p-6 shadow-lg border-l-4 border-yellow-500">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-600 text-sm">Dagens stanser</p>
+                      <p className="text-3xl font-bold text-yellow-600">{todayDowntimes.length}</p>
+                    </div>
+                    <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+                      <Clock className="w-6 h-6 text-yellow-600" />
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-xl p-6 shadow-lg border-l-4 border-red-500">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-600 text-sm">Total stansetid</p>
+                      <p className="text-3xl font-bold text-red-600">{todayDowntimes.reduce((sum, d) => sum + d.duration, 0)} min</p>
+                    </div>
+                    <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
+                      <TrendingUp className="w-6 h-6 text-red-600" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Live Machine Status Table */}
+              <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div className="bg-gray-50 p-4 border-b">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                    <h3 className="text-lg font-bold text-gray-900">🏭 Live Maskinstatus</h3>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left p-4 font-semibold text-gray-700">Maskin</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Status</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Varighet</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Start tid</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Operatør</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Prioritet</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {machines.map(machine => {
+                        const isActive = activeDowntimes.some(d => d.machineId === machine.id);
+                        const activeDowntime = activeDowntimes.find(d => d.machineId === machine.id);
+                        const duration = activeDowntime ? Math.floor((currentTime - activeDowntime.startTime) / 1000 / 60) : 0;
+                        
+                        return (
+                          <tr key={machine.id} className={`border-b hover:bg-gray-50 ${
+                            isActive ? 'bg-red-50' : 'bg-green-50'
+                          }`}>
+                            <td className="p-4">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-4 h-4 ${machine.color} rounded`}></div>
+                                <span className="font-medium text-gray-900">{machine.name}</span>
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              {isActive ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                                  <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                                    🚨 STANS
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                  <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                                    ✅ I DRIFT
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-4">
+                              {isActive && activeDowntime ? (
+                                <span className="text-lg font-bold text-red-600 tabular-nums">
+                                  {formatDuration(activeDowntime.startTime)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
+                            <td className="p-4">
+                              {isActive && activeDowntime ? (
+                                <span className="text-sm text-gray-600">
+                                  {new Date(activeDowntime.startTime).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
+                            <td className="p-4">
+                              {isActive && activeDowntime ? (
+                                <span className="text-sm text-gray-600">{activeDowntime.operatorName}</span>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
+                            <td className="p-4">
+                              {isActive ? (
+                                duration > 60 ? (
+                                  <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-medium">
+                                    🔴 KRITISK
+                                  </span>
+                                ) : duration > 30 ? (
+                                  <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-medium">
+                                    🟡 HØY
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded text-xs font-medium">
+                                    🟠 NORMAL
+                                  </span>
+                                )
+                              ) : (
+                                <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
+                                  ✅ OK
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {view === 'users' && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-2xl shadow-xl p-6 text-white">
+                <h2 className="text-2xl font-bold mb-2">👥 Brukere - {department?.displayName}</h2>
+                <p className="text-indigo-100">Administrer operatører i avdelingen</p>
+              </div>
+              
+              {/* Add New User */}
+              <div className="bg-white rounded-xl p-6 shadow-lg">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">➕ Legg til ny operatør</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Brukernavn *</label>
+                    <input
+                      type="text"
+                      value={newUsername}
+                      onChange={(e) => setNewUsername(e.target.value)}
+                      placeholder="sjef"
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Passord *</label>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={addNewUser}
+                  className="px-6 py-3 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl font-bold transition-all"
+                >
+                  ➕ Legg til operatør
+                </button>
+              </div>
+              
+              {/* Existing Users */}
+              <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div className="bg-gray-50 p-4 border-b">
+                  <h3 className="text-lg font-bold text-gray-900">Eksisterende brukere</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left p-4 font-semibold text-gray-700">Brukernavn</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Rolle</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Status</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Handlinger</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {departmentUsers.map(u => (
+                        <tr key={u.id} className="border-b hover:bg-gray-50">
+                          <td className="p-4 font-medium text-gray-900">{u.name}</td>
+                          <td className="p-4">
+                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                              u.role === 'manager' ? 'bg-purple-100 text-purple-800' :
+                              u.role === 'admin' ? 'bg-red-100 text-red-800' :
+                              'bg-blue-100 text-blue-800'
+                            }`}>
+                              {u.role === 'manager' ? 'Sjef' : u.role === 'admin' ? 'Administrator' : 'Operatør'}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                              Aktiv
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            {u.role === 'operator' && (
+                              <button
+                                onClick={() => deleteUser(u.id)}
+                                className="px-3 py-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                                title="Slett"
+                              >
+                                🗑️ Slett
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
           {view === 'today' && (
             <div className="space-y-6">
               {/* Header */}
@@ -1234,36 +1626,39 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
               </div>
               
               {/* Produksjonsoversikt */}
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="bg-gray-50 p-4 border-b">
-                  <h3 className="text-lg font-bold text-gray-900">Produksjonsoversikt</h3>
+              <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl shadow-xl border border-slate-700 overflow-hidden">
+                <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-4 border-b border-blue-500">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5" />
+                    Produksjonsoversikt
+                  </h3>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
-                      <tr className="bg-gray-50 border-b">
-                        <th className="text-left p-3 font-semibold text-gray-700">Periode</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Post</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Varighet</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Stansetid</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Pause</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Effektivitet</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Antall Stanser</th>
+                      <tr className="bg-slate-700 border-b border-slate-600">
+                        <th className="text-left p-3 font-semibold text-slate-200">Periode</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Post</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Varighet</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Stansetid</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Pause</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Effektivitet</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Antall Stanser</th>
                       </tr>
                     </thead>
                     <tbody>
-                      <tr className="border-b">
-                        <td className="p-3 font-medium">TOTALT I DAG:</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">0 min</td>
-                        <td className="p-3">{todayDowntimes.reduce((sum, d) => sum + d.duration, 0)} min</td>
-                        <td className="p-3">0 min</td>
+                      <tr className="border-b border-slate-600 bg-slate-800">
+                        <td className="p-3 font-medium text-white">TOTALT I DAG:</td>
+                        <td className="p-3 text-slate-300">-</td>
+                        <td className="p-3 text-slate-300">0 min</td>
+                        <td className="p-3 text-slate-300">{todayDowntimes.reduce((sum, d) => sum + d.duration, 0)} min</td>
+                        <td className="p-3 text-slate-300">0 min</td>
                         <td className="p-3">
                           <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-sm font-medium">
                             {todayDowntimes.length === 0 ? '100%' : Math.max(0, 100 - Math.round((todayDowntimes.reduce((sum, d) => sum + d.duration, 0) / 480) * 100)) + '%'}
                           </span>
                         </td>
-                        <td className="p-3 font-medium">{todayDowntimes.length}</td>
+                        <td className="p-3 font-medium text-white">{todayDowntimes.length}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1376,6 +1771,265 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                   </div>
                 </div>
               )}
+              </div>
+            </div>
+          )}
+
+          {view === 'yesterday' && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-purple-600 to-purple-700 rounded-2xl shadow-xl p-6 text-white">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h2 className="text-2xl font-bold mb-2">
+                      {yesterday.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                    </h2>
+                    <div className="flex items-center gap-4">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold">{yesterdayDowntimes.length}</div>
+                        <div className="text-purple-100 text-sm">stanser</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Produksjonsoversikt */}
+              <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl shadow-xl border border-slate-700 overflow-hidden">
+                <div className="bg-gradient-to-r from-purple-600 to-purple-700 p-4 border-b border-purple-500">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5" />
+                    Produksjonsoversikt
+                  </h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-slate-700 border-b border-slate-600">
+                        <th className="text-left p-3 font-semibold text-slate-200">Periode</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Post</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Varighet</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Stansetid</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Pause</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Effektivitet</th>
+                        <th className="text-left p-3 font-semibold text-slate-200">Antall Stanser</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-slate-600 bg-slate-800">
+                        <td className="p-3 font-medium text-white">TOTALT I GÅR:</td>
+                        <td className="p-3 text-slate-300">-</td>
+                        <td className="p-3 text-slate-300">0 min</td>
+                        <td className="p-3 text-slate-300">{yesterdayDowntimes.reduce((sum, d) => sum + d.duration, 0)} min</td>
+                        <td className="p-3 text-slate-300">0 min</td>
+                        <td className="p-3">
+                          <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-sm font-medium">
+                            {yesterdayDowntimes.length === 0 ? '100%' : Math.max(0, 100 - Math.round((yesterdayDowntimes.reduce((sum, d) => sum + d.duration, 0) / 480) * 100)) + '%'}
+                          </span>
+                        </td>
+                        <td className="p-3 font-medium text-white">{yesterdayDowntimes.length}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Detaljerte stanser */}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 p-4 border-b">
+                  <h3 className="text-lg font-bold text-gray-900">Detaljerte stanser i går</h3>
+                </div>
+                
+              {yesterdayDowntimes.length === 0 ? (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-12 text-center">
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle className="w-8 h-8 text-green-500" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-gray-900 mb-2">Ingen stanser i går</h3>
+                  <p className="text-gray-500">Flott arbeid - produksjonen gikk som den skulle.</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-gray-50 border-b-2 border-gray-200">
+                          <th className="text-left p-4 font-semibold text-gray-700">#</th>
+                          <th className="text-left p-4 font-semibold text-gray-700">Tid</th>
+                          <th className="text-left p-4 font-semibold text-gray-700">Maskin</th>
+                          <th className="text-left p-4 font-semibold text-gray-700">Årsak</th>
+                          <th className="text-left p-4 font-semibold text-gray-700">Varighet</th>
+                          <th className="text-left p-4 font-semibold text-gray-700">Post Nr</th>
+                          <th className="text-left p-4 font-semibold text-gray-700">Operatør</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {yesterdayDowntimes.map((d, index) => {
+                          const machine = machines.find(m => m.name === d.machineName);
+                          return (
+                            <tr key={d.id} className="border-b-4 border-gray-400 hover:bg-gray-50 transition-colors">
+                              <td className="p-4">
+                                <div className={`w-8 h-8 ${machine?.color || 'bg-gray-500'} text-white rounded-lg flex items-center justify-center font-semibold text-sm`}>
+                                  {index + 1}
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <span className="text-sm font-medium text-gray-900">
+                                  {new Date(d.startTime).toLocaleDateString('nb-NO', { day: '2-digit', month: '2-digit', year: 'numeric' })} {new Date(d.startTime).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}-{new Date(d.endTime).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </td>
+                              <td className="p-4">
+                                <span className="font-medium text-gray-900">
+                                  {d.machineName}
+                                </span>
+                              </td>
+                              <td className="p-4">
+                                <div className="text-sm text-gray-700 max-w-xs">
+                                  {d.comment.length > 50 ? d.comment.substring(0, 50) + '...' : d.comment}
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <span className={`px-2 py-1 rounded text-sm font-medium ${
+                                  d.duration > 60 ? 'bg-red-100 text-red-800' :
+                                  d.duration > 30 ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-green-100 text-green-800'
+                                }`}>
+                                  {d.duration} min
+                                </span>
+                              </td>
+                              <td className="p-4">
+                                <div className="text-sm">
+                                  {d.postNumber ? (
+                                    <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                                      {d.postNumber}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400 text-xs">-</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <div className="text-sm text-gray-600">{d.operatorName}</div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              </div>
+              
+              {/* Maskin analyse tabell for i går */}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 p-4 border-b">
+                  <h3 className="text-lg font-bold text-gray-900">🔧 Maskinanalyse i går</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left p-4 font-semibold text-gray-700">Maskin</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Antall Stanser</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Total Tid</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Gjennomsnitt</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const machineStats = {};
+                        yesterdayDowntimes.forEach(d => {
+                          if (!machineStats[d.machineName]) {
+                            machineStats[d.machineName] = { count: 0, duration: 0 };
+                          }
+                          machineStats[d.machineName].count += 1;
+                          machineStats[d.machineName].duration += d.duration;
+                        });
+                        
+                        // Legg til maskiner uten stanser
+                        machines.forEach(machine => {
+                          if (!machineStats[machine.name]) {
+                            machineStats[machine.name] = { count: 0, duration: 0 };
+                          }
+                        });
+                        
+                        return Object.entries(machineStats)
+                          .sort(([,a], [,b]) => b.duration - a.duration)
+                          .map(([machineName, stats]) => {
+                            const machine = machines.find(m => m.name === machineName);
+                            return (
+                              <tr key={machineName} className="border-b hover:bg-gray-50">
+                                <td className="p-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className={`w-4 h-4 ${machine?.color || 'bg-gray-500'} rounded`}></div>
+                                    <span className="font-medium text-gray-900">{machineName}</span>
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  <span className="text-lg font-bold text-gray-900">{stats.count}</span>
+                                </td>
+                                <td className="p-4">
+                                  <span className={`text-lg font-bold ${
+                                    stats.duration > 60 ? 'text-red-600' :
+                                    stats.duration > 30 ? 'text-yellow-600' :
+                                    stats.duration === 0 ? 'text-green-600' :
+                                    'text-blue-600'
+                                  }`}>{stats.duration} min</span>
+                                </td>
+                                <td className="p-4">
+                                  <span className="text-gray-700">
+                                    {stats.count > 0 ? Math.round(stats.duration / stats.count) : 0} min
+                                  </span>
+                                </td>
+                                <td className="p-4">
+                                  {stats.count === 0 ? (
+                                    <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                                      ✅ OK
+                                    </span>
+                                  ) : stats.duration > 60 ? (
+                                    <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                                      🚨 Høy
+                                    </span>
+                                  ) : stats.duration > 30 ? (
+                                    <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
+                                      ⚠️ Middels
+                                    </span>
+                                  ) : (
+                                    <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                                      🟡 Lav
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="bg-gray-50 p-4 border-t">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">Status forklaring:</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">✅ OK</span>
+                      <span className="text-gray-600">Ingen stanser</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">🟡 Lav</span>
+                      <span className="text-gray-600">Under 30 min</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">⚠️ Middels</span>
+                      <span className="text-gray-600">30-60 min</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium">🚨 Høy</span>
+                      <span className="text-gray-600">Over 60 min</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
