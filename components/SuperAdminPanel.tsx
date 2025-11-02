@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User, Department, getDepartments, createDepartment, addUser, getDepartmentUsers } from '@/lib/auth';
 import { Building2, Users, Plus, Settings, BarChart3, Shield, Trash2, Edit2, AlertCircle, CheckCircle, TrendingUp } from 'lucide-react';
+import DepartmentDowntimeTracker from './DepartmentDowntimeTracker';
 
 interface SuperAdminPanelProps {
   user: User;
@@ -26,8 +27,6 @@ function FactoryAnalytics({ departments }: { departments: Department[] }) {
 
   useEffect(() => {
     loadAnalyticsData();
-    const interval = setInterval(loadAnalyticsData, 30000); // Update every 30 seconds
-    return () => clearInterval(interval);
   }, [departments]);
 
   const loadAnalyticsData = async () => {
@@ -362,7 +361,9 @@ function LiveAllDowntimes() {
 
   useEffect(() => {
     loadAllTodayDowntimes();
-    const interval = setInterval(loadAllTodayDowntimes, 5000); // Refresh every 5 seconds
+    const interval = setInterval(() => {
+      loadAllTodayDowntimes();
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -501,7 +502,9 @@ function LiveDepartmentOverview({ department }: { department: Department }) {
 
   useEffect(() => {
     loadTodayDowntimes();
-    const interval = setInterval(loadTodayDowntimes, 5000); // Refresh every 5 seconds for real-time updates
+    const interval = setInterval(() => {
+      loadTodayDowntimes();
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -626,7 +629,8 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [departmentUsers, setDepartmentUsers] = useState<User[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [view, setView] = useState<'live' | 'departments' | 'users' | 'analytics'>('live');
+  const [view, setView] = useState<'live' | 'departments' | 'users' | 'analytics' | 'historikk'>('live');
+  const [selectedHistoryDepartment, setSelectedHistoryDepartment] = useState<Department | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Forms
@@ -643,13 +647,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     loadDepartments();
     loadAllUsers();
     
-    // Auto-refresh departments and users every 10 seconds
-    const interval = setInterval(() => {
-      loadDepartments();
-      loadAllUsers();
-    }, 10000);
-    
-    return () => clearInterval(interval);
+
   }, []);
 
   useEffect(() => {
@@ -867,6 +865,16 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
               }`}
             >
               📈 Analyse
+            </button>
+            <button
+              onClick={() => setView('historikk')}
+              className={`py-4 px-2 border-b-2 font-medium text-sm ${
+                view === 'historikk' 
+                  ? 'border-purple-500 text-purple-600' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              📋 Historikk
             </button>
           </div>
         </div>
@@ -1371,6 +1379,53 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
 
         {view === 'analytics' && (
           <FactoryAnalytics departments={departments} />
+        )}
+
+        {view === 'historikk' && (
+          <div className="space-y-6">
+            {/* Department Selection */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Velg avdeling for historikk</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {departments.map((dept) => (
+                  <button
+                    key={dept.id}
+                    onClick={() => setSelectedHistoryDepartment(dept)}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      selectedHistoryDepartment?.id === dept.id
+                        ? 'border-purple-500 bg-purple-50 text-purple-700'
+                        : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                    }`}
+                  >
+                    <Building2 className="w-6 h-6 mx-auto mb-2" />
+                    <div className="font-medium">{dept.displayName}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Manager Panel for Selected Department */}
+            {selectedHistoryDepartment && (
+              <div className="bg-white rounded-lg shadow">
+                <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-indigo-50">
+                  <h3 className="text-xl font-bold text-gray-900">
+                    Manager panel for {selectedHistoryDepartment.displayName}
+                  </h3>
+                </div>
+                <div className="p-6">
+                  <DepartmentDowntimeTracker 
+                    user={{
+                      ...user,
+                      role: 'manager',
+                      departmentId: selectedHistoryDepartment.id
+                    }}
+                    department={selectedHistoryDepartment}
+                    onLogout={() => {}}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

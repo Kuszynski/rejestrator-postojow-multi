@@ -722,17 +722,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
             
             {(user.role === 'manager' || user.role === 'admin' || user.role === 'super') && (
               <>
-                <button
-                  onClick={() => setView('reports')}
-                  className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
-                    view === 'reports' 
-                      ? 'bg-white text-blue-600 shadow-lg' 
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
-                  }`}
-                >
-                  <BarChart3 className="w-4 h-4" />
-                  Rapporter
-                </button>
+
                 
                 <button
                   onClick={() => setView('history')}
@@ -975,78 +965,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
             </div>
           )}
 
-          {view === 'reports' && (
-            <div className="space-y-6">
-              <div className="bg-gradient-to-r from-purple-600 to-purple-700 rounded-2xl shadow-xl p-6 text-white">
-                <h2 className="text-2xl font-bold mb-2">📈 Rapporter</h2>
-                <p className="text-purple-100">Generer og last ned rapporter</p>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div className="bg-white rounded-xl p-6 shadow-lg">
-                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-                    <Calendar className="w-6 h-6 text-blue-600" />
-                  </div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-2">Daglig rapport</h3>
-                  <p className="text-gray-600 text-sm mb-4">Dagens stanser og statistikk</p>
-                  <button className="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors">
-                    <Download className="w-4 h-4 inline mr-2" />
-                    Last ned PDF
-                  </button>
-                </div>
-                
-                <div className="bg-white rounded-xl p-6 shadow-lg">
-                  <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
-                    <BarChart3 className="w-6 h-6 text-green-600" />
-                  </div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-2">Ukentlig rapport</h3>
-                  <p className="text-gray-600 text-sm mb-4">Sammendrag av uken</p>
-                  <button className="w-full px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors">
-                    <Download className="w-4 h-4 inline mr-2" />
-                    Last ned PDF
-                  </button>
-                </div>
-                
-                <div className="bg-white rounded-xl p-6 shadow-lg">
-                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
-                    <TrendingUp className="w-6 h-6 text-purple-600" />
-                  </div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-2">Månedlig rapport</h3>
-                  <p className="text-gray-600 text-sm mb-4">Detaljert månedsoversikt</p>
-                  <button className="w-full px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg transition-colors">
-                    <Download className="w-4 h-4 inline mr-2" />
-                    Last ned PDF
-                  </button>
-                </div>
-              </div>
-              
-              <div className="bg-white rounded-xl p-6 shadow-lg">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">📊 Hurtigstatistikk</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <p className="text-2xl font-bold text-gray-900">{todayDowntimes.length}</p>
-                    <p className="text-sm text-gray-600">Stanser i dag</p>
-                  </div>
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <p className="text-2xl font-bold text-gray-900">
-                      {todayDowntimes.reduce((sum, d) => sum + d.duration, 0)}
-                    </p>
-                    <p className="text-sm text-gray-600">Minutter i dag</p>
-                  </div>
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <p className="text-2xl font-bold text-gray-900">
-                      {todayDowntimes.length > 0 ? Math.round(todayDowntimes.reduce((sum, d) => sum + d.duration, 0) / todayDowntimes.length) : 0}
-                    </p>
-                    <p className="text-sm text-gray-600">Snitt varighet</p>
-                  </div>
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <p className="text-2xl font-bold text-gray-900">{machines.length}</p>
-                    <p className="text-sm text-gray-600">Maskiner totalt</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+
 
           {view === 'analyse' && (
             <div className="space-y-6">
