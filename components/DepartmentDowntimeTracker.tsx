@@ -63,6 +63,8 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
   const [newMachineName, setNewMachineName] = useState('');
   const [editMachine, setEditMachine] = useState(null);
   const [editMachineName, setEditMachineName] = useState('');
+  const [dailyNote, setDailyNote] = useState('');
+  const [dailyNotes, setDailyNotes] = useState([]);
 
   const today = new Date().toISOString().split('T')[0];
   const yesterday = new Date();
@@ -84,6 +86,8 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
       loadMachines().then(() => {
         loadData();
       });
+    } else if (user.role === 'super_admin') {
+      setLoading(false);
     }
   }, [department, user]);
 
@@ -105,7 +109,18 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     if (view === 'history') {
       setFilteredHistory(downtimeHistory);
     }
+    if ((view === 'note' || view === 'notes')) {
+      loadDailyNotes();
+    }
   }, [view, department, downtimeHistory]);
+
+  // Auto-load notes for super_admin
+  useEffect(() => {
+    if (user.role === 'super_admin') {
+      setView('notes');
+      loadDailyNotes();
+    }
+  }, [user.role]);
 
   // Filter history when dates change
   useEffect(() => {
@@ -202,6 +217,56 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
       console.error('Unexpected error loading data:', error);
     }
     setLoading(false);
+  };
+
+  const loadDailyNotes = async () => {
+    try {
+      let query = supabase.from('daily_notes').select(`
+        *,
+        departments(display_name)
+      `);
+      
+      if (user.role !== 'super_admin' && department) {
+        query = query.eq('department_id', user.departmentId);
+      }
+      
+      const { data, error } = await query.order('date', { ascending: false });
+
+      if (!error && data) {
+        const enrichedNotes = data.map(note => ({
+          ...note,
+          departmentName: note.departments?.display_name || 'Ukjent avdeling'
+        }));
+        setDailyNotes(enrichedNotes);
+      }
+    } catch (error) {
+      console.error('Error loading notes:', error);
+    }
+  };
+
+  const saveDailyNote = async () => {
+    if (!dailyNote.trim()) {
+      alert('Vennligst skriv inn et notat');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('daily_notes')
+      .insert([{
+        department_id: user.departmentId,
+        operator_id: user.id,
+        operator_name: user.name,
+        note: dailyNote.trim(),
+        date: new Date().toISOString().split('T')[0]
+      }]);
+
+    if (error) {
+      alert('Feil ved lagring av notat');
+    } else {
+      setDailyNote('');
+      loadDailyNotes();
+      alert('Notat lagret!');
+    }
   };
 
   const startDowntime = (machine: Machine) => {
@@ -649,6 +714,171 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     );
   }
 
+  // Super admin notes view only
+  if (user.role === 'super_admin') {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <div className="text-xl text-gray-600">Laster notater...</div>
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">Fra dato:</label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">Til dato:</label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+              />
+            </div>
+            <div className="flex items-end gap-2">
+              <button
+                onClick={clearFilters}
+                className="px-4 py-3 bg-gray-500 hover:bg-gray-600 text-white rounded-xl font-bold transition-all"
+              >
+                Tøm
+              </button>
+              <button
+                onClick={() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  setFromDate(today);
+                  setToDate(today);
+                }}
+                className="px-4 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-bold transition-all"
+              >
+                I dag
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = yesterday.toISOString().split('T')[0];
+                setFromDate(yesterdayStr);
+                setToDate(yesterdayStr);
+              }}
+              className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg font-medium transition-all"
+            >
+              I går
+            </button>
+            <button
+              onClick={() => {
+                const today = new Date();
+                const weekStart = new Date(today);
+                const dayOfWeek = today.getDay();
+                const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                weekStart.setDate(today.getDate() + daysToMonday);
+                setFromDate(weekStart.toISOString().split('T')[0]);
+                setToDate(new Date().toISOString().split('T')[0]);
+              }}
+              className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-all"
+            >
+              Denne uken
+            </button>
+            <button
+              onClick={() => {
+                const today = new Date();
+                const lastWeekEnd = new Date(today);
+                const dayOfWeek = today.getDay();
+                const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                lastWeekEnd.setDate(today.getDate() + daysToMonday - 1);
+                const lastWeekStart = new Date(lastWeekEnd);
+                lastWeekStart.setDate(lastWeekEnd.getDate() - 6);
+                setFromDate(lastWeekStart.toISOString().split('T')[0]);
+                setToDate(lastWeekEnd.toISOString().split('T')[0]);
+              }}
+              className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-all"
+            >
+              Forrige uke
+            </button>
+          </div>
+        </div>
+        
+        {dailyNotes.filter(note => {
+          if (!fromDate && !toDate) return true;
+          if (fromDate && note.date < fromDate) return false;
+          if (toDate && note.date > toDate) return false;
+          return true;
+        }).length === 0 ? (
+          <div className="bg-white rounded-xl p-12 text-center shadow-lg">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="w-8 h-8 text-gray-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Ingen notater</h3>
+            <p className="text-gray-500">Ingen notater funnet for valgt periode</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+            <div className="bg-gray-50 p-4 border-b">
+              <h3 className="text-lg font-bold text-gray-900">
+                Notater ({dailyNotes.filter(note => {
+                  if (!fromDate && !toDate) return true;
+                  if (fromDate && note.date < fromDate) return false;
+                  if (toDate && note.date > toDate) return false;
+                  return true;
+                }).length})
+              </h3>
+            </div>
+            <div className="divide-y">
+              {dailyNotes.filter(note => {
+                if (!fromDate && !toDate) return true;
+                if (fromDate && note.date < fromDate) return false;
+                if (toDate && note.date > toDate) return false;
+                return true;
+              }).map(note => (
+                <div key={note.id} className="p-6 hover:bg-gray-50 transition-colors">
+                  <div className="mb-3">
+                    <div className="flex justify-between items-start gap-4 mb-2">
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-600">Operatør:</span>
+                            <span className="font-bold text-lg text-gray-900">{note.operator_name}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-600">Avdeling:</span>
+                            <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                              {note.departmentName}
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-gray-500 text-sm">
+                          {new Date(note.date).toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-400 whitespace-nowrap">
+                        {new Date(note.created_at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                    <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{note.note}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // Operator interface
   return (
     <div className="h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex flex-col overflow-hidden">
@@ -730,6 +960,20 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
               Analyse i dag
             </button>
             
+            {user.role === 'operator' && (
+              <button
+                onClick={() => setView('note')}
+                className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
+                  view === 'note' 
+                    ? 'bg-white text-blue-600 shadow-lg' 
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+                }`}
+              >
+                <Edit2 className="w-4 h-4" />
+                Notat
+              </button>
+            )}
+            
             {(user.role === 'manager' || user.role === 'admin' || user.role === 'super') && (
               <button
                 onClick={() => setView('yesterday')}
@@ -770,6 +1014,18 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                 >
                   <BarChart3 className="w-4 h-4" />
                   📋 Historikk
+                </button>
+                
+                <button
+                  onClick={() => setView('notes')}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
+                    view === 'notes' 
+                      ? 'bg-white text-blue-600 shadow-lg' 
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Notater{user.role === 'super_admin' ? ' (Alle)' : ''}
                 </button>
                 
                 <button
@@ -2243,6 +2499,62 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
             </div>
           )}
 
+          {view === 'note' && (
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-2xl shadow-xl p-6 text-white">
+                <h2 className="text-2xl font-bold mb-2">📝 Daglig notat</h2>
+                <p className="text-green-100">Skriv et notat til sjefen - problemer, forslag eller andre viktige ting</p>
+              </div>
+              
+              <div className="bg-white rounded-xl p-6 shadow-lg">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">Nytt notat for i dag</h3>
+                <textarea
+                  value={dailyNote}
+                  onChange={(e) => setDailyNote(e.target.value)}
+                  placeholder="Skriv hva sjefen bør vite...\n\nEksempler:\n• Maskin X trenger vedlikehold\n• Materialmangel på lager\n• Problemer med kvalitet\n• Forslag til forbedringer\n• Andre viktige ting"
+                  className="w-full px-4 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all h-48 resize-none text-base leading-relaxed"
+                  maxLength={1000}
+                />
+                <div className="mt-2 flex justify-between items-center">
+                  <span className="text-xs text-gray-500">{dailyNote.length}/1000 tegn</span>
+                  <button
+                    onClick={saveDailyNote}
+                    disabled={!dailyNote.trim()}
+                    className="px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all"
+                  >
+                    💾 Lagre notat
+                  </button>
+                </div>
+              </div>
+              
+              {(user.role === 'manager' || user.role === 'admin' || user.role === 'super') && dailyNotes.length > 0 && (
+                <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                  <div className="bg-gray-50 p-4 border-b">
+                    <h3 className="text-lg font-bold text-gray-900">Tidligere notater</h3>
+                  </div>
+                  <div className="divide-y">
+                    {dailyNotes.slice(0, 10).map(note => (
+                      <div key={note.id} className="p-4 hover:bg-gray-50">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <span className="font-bold text-gray-900">{note.operator_name}</span>
+                            <span className="text-gray-500 text-sm ml-2">
+                              {new Date(note.date).toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                            </span>
+                          </div>
+                          <span className="text-xs text-gray-400">
+                            {new Date(note.created_at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p className="text-gray-700 whitespace-pre-wrap">{note.note}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {view === 'history' && (
             <div className="space-y-6">
               {/* Header */}
@@ -2502,6 +2814,153 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {view === 'notes' && (
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-2xl shadow-xl p-6 text-white">
+                <h2 className="text-2xl font-bold mb-2">📝 Daglige notater fra operatører</h2>
+                <p className="text-indigo-100">Oversikt over alle notater fra operatørene</p>
+              </div>
+              
+              <div className="bg-white rounded-xl p-6 shadow-lg">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Fra dato:</label>
+                    <input
+                      type="date"
+                      value={fromDate}
+                      onChange={(e) => setFromDate(e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Til dato:</label>
+                    <input
+                      type="date"
+                      value={toDate}
+                      onChange={(e) => setToDate(e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                    />
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <button
+                      onClick={clearFilters}
+                      className="px-4 py-3 bg-gray-500 hover:bg-gray-600 text-white rounded-xl font-bold transition-all"
+                    >
+                      Tøm
+                    </button>
+                    <button
+                      onClick={() => {
+                        const today = new Date().toISOString().split('T')[0];
+                        setFromDate(today);
+                        setToDate(today);
+                      }}
+                      className="px-4 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-bold transition-all"
+                    >
+                      I dag
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => {
+                      const yesterday = new Date();
+                      yesterday.setDate(yesterday.getDate() - 1);
+                      const yesterdayStr = yesterday.toISOString().split('T')[0];
+                      setFromDate(yesterdayStr);
+                      setToDate(yesterdayStr);
+                    }}
+                    className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg font-medium transition-all"
+                  >
+                    I går
+                  </button>
+                  <button
+                    onClick={() => {
+                      const today = new Date();
+                      const weekStart = new Date(today);
+                      const dayOfWeek = today.getDay();
+                      const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                      weekStart.setDate(today.getDate() + daysToMonday);
+                      setFromDate(weekStart.toISOString().split('T')[0]);
+                      setToDate(new Date().toISOString().split('T')[0]);
+                    }}
+                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-all"
+                  >
+                    Denne uken
+                  </button>
+                  <button
+                    onClick={() => {
+                      const today = new Date();
+                      const lastWeekEnd = new Date(today);
+                      const dayOfWeek = today.getDay();
+                      const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+                      lastWeekEnd.setDate(today.getDate() + daysToMonday - 1);
+                      const lastWeekStart = new Date(lastWeekEnd);
+                      lastWeekStart.setDate(lastWeekEnd.getDate() - 6);
+                      setFromDate(lastWeekStart.toISOString().split('T')[0]);
+                      setToDate(lastWeekEnd.toISOString().split('T')[0]);
+                    }}
+                    className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-all"
+                  >
+                    Forrige uke
+                  </button>
+                </div>
+              </div>
+              
+              {dailyNotes.filter(note => {
+                if (!fromDate && !toDate) return true;
+                if (fromDate && note.date < fromDate) return false;
+                if (toDate && note.date > toDate) return false;
+                return true;
+              }).length === 0 ? (
+                <div className="bg-white rounded-xl p-12 text-center shadow-lg">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle className="w-8 h-8 text-gray-400" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-gray-900 mb-2">Ingen notater</h3>
+                  <p className="text-gray-500">Ingen notater funnet for valgt periode</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                  <div className="bg-gray-50 p-4 border-b">
+                    <h3 className="text-lg font-bold text-gray-900">
+                      Notater ({dailyNotes.filter(note => {
+                        if (!fromDate && !toDate) return true;
+                        if (fromDate && note.date < fromDate) return false;
+                        if (toDate && note.date > toDate) return false;
+                        return true;
+                      }).length})
+                    </h3>
+                  </div>
+                  <div className="divide-y">
+                    {dailyNotes.filter(note => {
+                      if (!fromDate && !toDate) return true;
+                      if (fromDate && note.date < fromDate) return false;
+                      if (toDate && note.date > toDate) return false;
+                      return true;
+                    }).map(note => (
+                      <div key={note.id} className="p-6 hover:bg-gray-50 transition-colors">
+                        <div className="flex flex-col gap-2 mb-3">
+                          <div className="flex justify-between items-start gap-4">
+                            <span className="font-bold text-lg text-gray-900">{note.operator_name}</span>
+                            <span className="text-xs text-gray-400 whitespace-nowrap">
+                              {new Date(note.created_at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <span className="text-gray-500 text-sm">
+                            {new Date(note.date).toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                          </span>
+                        </div>
+                        <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                          <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{note.note}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2921,14 +3380,17 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                   
                   <button
                     onClick={() => {
-                      setCommentModal(null);
-                      setComment('');
-                      setPostNumber('');
-                      setManualPostNumber('');
+                      if (confirm('Vil du slette denne registreringen uten å lagre?')) {
+                        setActiveDowntimes(activeDowntimes.filter(d => d.id !== commentModal.id));
+                        setCommentModal(null);
+                        setComment('');
+                        setPostNumber('');
+                        setManualPostNumber('');
+                      }
                     }}
-                    className="w-full px-6 py-3 border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 font-medium text-gray-700"
+                    className="w-full px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-xl transition-all duration-200 font-bold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95"
                   >
-                    ❌ Avbryt
+                    🗑️ SLETT REGISTRERING
                   </button>
                 </div>
               </div>

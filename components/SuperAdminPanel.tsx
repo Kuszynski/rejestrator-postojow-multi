@@ -629,7 +629,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [departmentUsers, setDepartmentUsers] = useState<User[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [view, setView] = useState<'live' | 'departments' | 'users' | 'analytics' | 'historikk'>('live');
+  const [view, setView] = useState<'live' | 'departments' | 'users' | 'analytics' | 'historikk' | 'notater'>('live');
   const [selectedHistoryDepartment, setSelectedHistoryDepartment] = useState<Department | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -875,6 +875,16 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
               }`}
             >
               📋 Historikk
+            </button>
+            <button
+              onClick={() => setView('notater')}
+              className={`py-4 px-2 border-b-2 font-medium text-sm ${
+                view === 'notater' 
+                  ? 'border-purple-500 text-purple-600' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              📝 Notater (Alle)
             </button>
           </div>
         </div>
@@ -1379,6 +1389,25 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
 
         {view === 'analytics' && (
           <FactoryAnalytics departments={departments} />
+        )}
+
+        {view === 'notater' && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-2xl shadow-xl p-6 text-white">
+              <h2 className="text-2xl font-bold mb-2">📝 Daglige notater fra alle avdelinger</h2>
+              <p className="text-indigo-100">Oversikt over alle notater fra operatørene i hele firmaet</p>
+            </div>
+            
+            <DepartmentDowntimeTracker 
+              user={{
+                ...user,
+                role: 'super_admin',
+                departmentId: 0
+              }}
+              department={null}
+              onLogout={() => {}}
+            />
+          </div>
         )}
 
         {view === 'historikk' && (

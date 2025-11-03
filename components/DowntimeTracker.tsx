@@ -1538,13 +1538,27 @@ export default function DowntimeTracker() {
                               </div>
                               <div className="text-sm text-gray-500">varighet</div>
                             </div>
-                            <button
-                              onClick={() => stopDowntime(downtime)}
-                              className="flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-2xl font-bold transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95"
-                            >
-                              <Pause className="w-5 h-5" />
-                              Stopp
-                            </button>
+                            <div className="flex gap-3">
+                              <button
+                                onClick={() => {
+                                  if (confirm('Er du sikker på at du vil slette denne registreringen?')) {
+                                    setActiveDowntimes(activeDowntimes.filter(d => d.id !== downtime.id));
+                                  }
+                                }}
+                                className="flex items-center gap-2 px-6 py-4 bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 text-white rounded-2xl font-bold transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95"
+                                title="Slett registrering uten å lagre"
+                              >
+                                <Trash2 className="w-5 h-5" />
+                                Slett
+                              </button>
+                              <button
+                                onClick={() => stopDowntime(downtime)}
+                                className="flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-2xl font-bold transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95"
+                              >
+                                <Pause className="w-5 h-5" />
+                                Stopp
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -2875,13 +2889,17 @@ export default function DowntimeTracker() {
                   
                   <button
                     onClick={() => {
-                      setCommentModal(null);
-                      setComment('');
-                      setPostNumber('');
+                      console.log('SLETT BUTTON CLICKED - NEW CODE!');
+                      if (confirm('Vil du slette denne registreringen uten å lagre?')) {
+                        setActiveDowntimes(activeDowntimes.filter(d => d.id !== commentModal.id));
+                        setCommentModal(null);
+                        setComment('');
+                        setPostNumber('');
+                      }
                     }}
-                    className="w-full px-6 py-3 border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 font-medium text-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200"
+                    className="w-full px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-xl transition-all duration-200 font-bold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-red-300"
                   >
-                    ❌ Avbryt
+                    🗑️ SLETT REGISTRERING
                   </button>
                 </div>
 
