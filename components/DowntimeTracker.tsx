@@ -158,17 +158,31 @@ export default function DowntimeTracker() {
         console.log('Enriched data:', enrichedData);
         setDowntimeHistory(enrichedData);
         
-        // Znajdź ostatni numer postu z dzisiaj
+        // Znajdź ostatni numer postu - najpierw z dzisiaj, potem z wczoraj
         const today = new Date().toISOString().split('T')[0];
         const todayOmpostings = enrichedData
           .filter(d => d.date === today && d.machineName === 'Omposting/Korigering' && d.postNumber)
           .sort((a, b) => b.startTime - a.startTime);
         
         if (todayOmpostings.length > 0) {
-          console.log('Setting current post number:', todayOmpostings[0].postNumber);
+          console.log('Setting current post number from today:', todayOmpostings[0].postNumber);
           setCurrentPostNumber(todayOmpostings[0].postNumber);
         } else {
-          console.log('No ompostings found for today');
+          // Jeśli nie ma z dzisiaj, szukaj z wczoraj
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          const yesterdayStr = yesterday.toISOString().split('T')[0];
+          
+          const yesterdayOmpostings = enrichedData
+            .filter(d => d.date === yesterdayStr && d.machineName === 'Omposting/Korigering' && d.postNumber)
+            .sort((a, b) => b.startTime - a.startTime);
+          
+          if (yesterdayOmpostings.length > 0) {
+            console.log('Setting current post number from yesterday:', yesterdayOmpostings[0].postNumber);
+            setCurrentPostNumber(yesterdayOmpostings[0].postNumber);
+          } else {
+            console.log('No ompostings found for today or yesterday');
+          }
         }
       }
     } catch (error) {
@@ -1254,7 +1268,7 @@ export default function DowntimeTracker() {
                 <div className="pt-6">
                   <button
                     type="submit"
-                    className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold py-8 px-12 rounded-3xl transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-offset-2 shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98] text-2xl min-h-[100px]"
+                    className="w-full bg-beerenberg-red hover:bg-opacity-90 text-white font-bold py-8 px-12 rounded-3xl transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-beerenberg-red focus:ring-offset-2 shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98] text-2xl min-h-[100px]"
                   >
                     Logg inn
                   </button>
@@ -1449,7 +1463,7 @@ export default function DowntimeTracker() {
                 onClick={() => setView('main')}
                 className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
                   view === 'main' 
-                    ? 'bg-white text-blue-600 shadow-lg' 
+                    ? 'bg-white text-beerenberg-red shadow-lg' 
                     : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
                 }`}
               >
@@ -1461,7 +1475,7 @@ export default function DowntimeTracker() {
                 onClick={() => setView('today')}
                 className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center relative text-sm ${
                   view === 'today' 
-                    ? 'bg-white text-blue-600 shadow-lg' 
+                    ? 'bg-white text-beerenberg-red shadow-lg' 
                     : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
                 }`}
               >
@@ -1478,7 +1492,7 @@ export default function DowntimeTracker() {
                 onClick={() => setView('week')}
                 className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
                   view === 'week' 
-                    ? 'bg-white text-blue-600 shadow-lg' 
+                    ? 'bg-white text-beerenberg-red shadow-lg' 
                     : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
                 }`}
               >
@@ -1843,14 +1857,14 @@ export default function DowntimeTracker() {
                                 <div className="flex gap-2">
                                   <button
                                     onClick={() => openEditModal(d)}
-                                    className="p-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-colors"
+                                    className="p-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg transition-colors"
                                     title="Rediger"
                                   >
                                     <Edit2 className="w-4 h-4" />
                                   </button>
                                   <button
                                     onClick={() => deleteDowntime(d.id)}
-                                    className="p-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors"
+                                    className="p-2 bg-beerenberg-red/10 hover:bg-beerenberg-red/20 text-beerenberg-red rounded-lg transition-colors"
                                     title="Slett"
                                   >
                                     <Trash2 className="w-4 h-4" />
@@ -2007,14 +2021,14 @@ export default function DowntimeTracker() {
                                 <div className="flex gap-2">
                                   <button
                                     onClick={() => openEditModal(d)}
-                                    className="p-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-colors"
+                                    className="p-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg transition-colors"
                                     title="Rediger"
                                   >
                                     <Edit2 className="w-4 h-4" />
                                   </button>
                                   <button
                                     onClick={() => deleteDowntime(d.id)}
-                                    className="p-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors"
+                                    className="p-2 bg-beerenberg-red/10 hover:bg-beerenberg-red/20 text-beerenberg-red rounded-lg transition-colors"
                                     title="Slett"
                                   >
                                     <Trash2 className="w-4 h-4" />
