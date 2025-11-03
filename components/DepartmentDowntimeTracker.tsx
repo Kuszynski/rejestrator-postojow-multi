@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User, Department, hasPermission, getDepartmentUsers, addUser } from '@/lib/auth';
-import { Play, Pause, Clock, TrendingUp, BarChart3, Calendar, LogOut, AlertCircle, CheckCircle, Edit2, Trash2, Eye, Download, Wrench, Building2 } from 'lucide-react';
+import { Play, Pause, Clock, TrendingUp, BarChart3, Calendar, LogOut, AlertCircle, CheckCircle, Edit2, Trash2, Eye, Download, Wrench, Building2, Camera } from 'lucide-react';
 
 interface Machine {
   id: string;
@@ -423,12 +423,40 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
 
     // Upload new image if selected
     if (editImage) {
-      const fileExt = editImage.name.split('.').pop();
-      const fileName = `${editModal.id}_${Date.now()}.${fileExt}`;
+      // Compress image before upload
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = URL.createObjectURL(editImage);
+      });
+      
+      // Max width/height 800px
+      const maxSize = 800;
+      let width = img.width;
+      let height = img.height;
+      
+      if (width > height && width > maxSize) {
+        height = (height * maxSize) / width;
+        width = maxSize;
+      } else if (height > maxSize) {
+        width = (width * maxSize) / height;
+        height = maxSize;
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+      const fileName = `${editModal.id}_${Date.now()}.jpg`;
       
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('images')
-        .upload(fileName, editImage, {
+        .upload(fileName, blob, {
           cacheControl: '3600',
           upsert: false
         });
@@ -2202,12 +2230,13 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                               </td>
                               <td className="p-4">
                                 {d.imageUrl && (
-                                  <img 
-                                    src={d.imageUrl} 
-                                    alt="Bilde" 
-                                    className="w-5 h-5 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity" 
+                                  <button
                                     onClick={() => window.open(d.imageUrl, '_blank')}
-                                  />
+                                    className="p-2 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors"
+                                    title="Klikk for å se bilde"
+                                  >
+                                    <Camera className="w-4 h-4 text-blue-600" />
+                                  </button>
                                 )}
                               </td>
                               <td className="p-4">
