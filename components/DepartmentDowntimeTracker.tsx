@@ -3105,21 +3105,21 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                 <p className="text-green-100">Skriv et notat til sjefen - problemer, forslag eller andre viktige ting</p>
               </div>
               
-              <div className="bg-white rounded-xl p-6 shadow-lg">
+              <div className="bg-white rounded-xl p-6 shadow-lg w-full">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Nytt notat for i dag</h3>
                 <textarea
                   value={dailyNote}
                   onChange={(e) => setDailyNote(e.target.value)}
-                  placeholder="Skriv hva sjefen bør vite...\n\nEksempler:\n• Maskin X trenger vedlikehold\n• Materialmangel på lager\n• Problemer med kvalitet\n• Forslag til forbedringer\n• Andre viktige ting"
-                  className="w-full px-4 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all h-48 resize-none text-base leading-relaxed"
+                  placeholder=""
+                  className="w-full px-4 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all min-h-[400px] md:min-h-[500px] lg:min-h-[600px] resize-y text-lg md:text-xl leading-relaxed"
                   maxLength={1000}
                 />
-                <div className="mt-2 flex justify-between items-center">
-                  <span className="text-xs text-gray-500">{dailyNote.length}/1000 tegn</span>
+                <div className="mt-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+                  <span className="text-sm md:text-base text-gray-500">{dailyNote.length}/1000 tegn</span>
                   <button
                     onClick={saveDailyNote}
                     disabled={!dailyNote.trim()}
-                    className="px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all"
+                    className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all text-lg"
                   >
                     💾 Lagre notat
                   </button>
