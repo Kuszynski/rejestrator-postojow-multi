@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User, Department, hasPermission, getDepartmentUsers, addUser } from '@/lib/auth';
 import { Play, Pause, Clock, TrendingUp, BarChart3, Calendar, LogOut, AlertCircle, CheckCircle, Edit2, Trash2, Eye, Download, Wrench, Building2, Camera } from 'lucide-react';
+import NoteEditor from './NoteEditor';
 
 function DowntimeCell({ start, end, isPause, departmentId }) {
   const [value, setValue] = useState('...');
@@ -124,6 +125,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
   const [editingRow, setEditingRow] = useState(null);
   const [editRowData, setEditRowData] = useState({});
   const [savedProductionData, setSavedProductionData] = useState({});
+  const [showNoteEditor, setShowNoteEditor] = useState(false);
 
   const today = new Date().toISOString().split('T')[0];
   const yesterday = new Date();
@@ -327,29 +329,24 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     }
   };
 
-  const saveDailyNote = async () => {
-    if (!dailyNote.trim()) {
-      alert('Vennligst skriv inn et notat');
-      return;
-    }
-
+  const saveDailyNote = async (noteText: string) => {
     const { error } = await supabase
       .from('daily_notes')
       .insert([{
         department_id: user.departmentId,
         operator_id: user.id,
         operator_name: user.name,
-        note: dailyNote.trim(),
+        note: noteText.trim(),
         date: new Date().toISOString().split('T')[0]
       }]);
 
     if (error) {
-      alert('Feil ved lagring av notat');
-    } else {
-      setDailyNote('');
-      loadDailyNotes();
-      alert('Notat lagret!');
+      throw error;
     }
+    
+    setDailyNote('');
+    loadDailyNotes();
+    alert('Notat lagret!');
   };
 
   const startDowntime = (machine: Machine) => {
@@ -1042,7 +1039,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
   // Operator interface
   return (
     <div className="h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex flex-col overflow-hidden">
-      <div className="flex-1 flex flex-col px-2 py-2">
+      <div className="flex-1 flex flex-col px-6 py-2">
         {/* Modern Header */}
         <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl shadow-xl border border-slate-700 p-4 mb-4 flex-shrink-0">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -1122,12 +1119,8 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
             
             {user.role === 'operator' && (
               <button
-                onClick={() => setView('note')}
-                className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
-                  view === 'note' 
-                    ? 'bg-white text-blue-600 shadow-lg' 
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
-                }`}
+                onClick={() => setShowNoteEditor(true)}
+                className="flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm text-gray-600 hover:text-gray-900 hover:bg-white/50"
               >
                 <Edit2 className="w-4 h-4" />
                 Notat
@@ -1240,7 +1233,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto w-full">
           {view === 'main' && (
             <>
               {activeDowntimes.length > 0 && (
@@ -3099,58 +3092,71 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
           )}
 
           {view === 'note' && (
-            <div className="space-y-6">
-              <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-2xl shadow-xl p-6 text-white">
-                <h2 className="text-2xl font-bold mb-2">📝 Daglig notat</h2>
-                <p className="text-green-100">Skriv et notat til sjefen - problemer, forslag eller andre viktige ting</p>
-              </div>
-              
-              <div className="bg-white rounded-xl p-6 shadow-lg w-full">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Nytt notat for i dag</h3>
-                <textarea
-                  value={dailyNote}
-                  onChange={(e) => setDailyNote(e.target.value)}
-                  placeholder=""
-                  className="w-full px-4 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all min-h-[400px] md:min-h-[500px] lg:min-h-[600px] resize-y text-lg md:text-xl leading-relaxed"
-                  maxLength={1000}
-                />
-                <div className="mt-4 flex flex-col sm:flex-row justify-between items-center gap-3">
-                  <span className="text-sm md:text-base text-gray-500">{dailyNote.length}/1000 tegn</span>
-                  <button
-                    onClick={saveDailyNote}
-                    disabled={!dailyNote.trim()}
-                    className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all text-lg"
-                  >
-                    💾 Lagre notat
-                  </button>
-                </div>
-              </div>
-              
-              {(user.role === 'manager' || user.role === 'admin' || user.role === 'super') && dailyNotes.length > 0 && (
-                <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-                  <div className="bg-gray-50 p-4 border-b">
-                    <h3 className="text-lg font-bold text-gray-900">Tidligere notater</h3>
+            <div className="fixed inset-0 bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 z-50 overflow-auto">
+              <div className="min-h-screen p-4 md:p-8">
+                <div className="max-w-7xl mx-auto space-y-6">
+                  <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-2xl shadow-xl p-6 text-white">
+                    <h2 className="text-2xl font-bold mb-2">📝 Daglig notat</h2>
+                    <p className="text-green-100">Skriv et notat til sjefen - problemer, forslag eller andre viktige ting</p>
                   </div>
-                  <div className="divide-y">
-                    {dailyNotes.slice(0, 10).map(note => (
-                      <div key={note.id} className="p-4 hover:bg-gray-50">
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <span className="font-bold text-gray-900">{note.operator_name}</span>
-                            <span className="text-gray-500 text-sm ml-2">
-                              {new Date(note.date).toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                            </span>
-                          </div>
-                          <span className="text-xs text-gray-400">
-                            {new Date(note.created_at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <p className="text-gray-700 whitespace-pre-wrap">{note.note}</p>
+                  
+                  <div className="bg-white rounded-xl p-6 md:p-8 shadow-lg">
+                    <h3 className="text-lg font-bold text-gray-900 mb-4">Nytt notat for i dag</h3>
+                    <textarea
+                      ref={textareaRef}
+                      value={dailyNote}
+                      onChange={(e) => setDailyNote(e.target.value)}
+                      placeholder="Skriv ditt notat her..."
+                      className="w-full px-6 py-6 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all min-h-[500px] text-xl leading-relaxed resize-y"
+                      maxLength={1000}
+                    />
+                    <div className="mt-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+                      <span className="text-sm md:text-base text-gray-500">{dailyNote.length}/1000 tegn</span>
+                      <div className="flex gap-3 w-full sm:w-auto">
+                        <button
+                          onClick={() => setView('today')}
+                          className="px-6 py-4 bg-gray-500 hover:bg-gray-600 text-white rounded-xl font-bold transition-all text-lg"
+                        >
+                          ← Tilbake
+                        </button>
+                        <button
+                          onClick={saveDailyNote}
+                          disabled={!dailyNote.trim()}
+                          className="flex-1 sm:flex-none px-8 py-4 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all text-lg"
+                        >
+                          💾 Lagre notat
+                        </button>
                       </div>
-                    ))}
+                    </div>
                   </div>
+              
+                  {(user.role === 'manager' || user.role === 'admin' || user.role === 'super') && dailyNotes.length > 0 && (
+                    <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                      <div className="bg-gray-50 p-4 border-b">
+                        <h3 className="text-lg font-bold text-gray-900">Tidligere notater</h3>
+                      </div>
+                      <div className="divide-y">
+                        {dailyNotes.slice(0, 10).map(note => (
+                          <div key={note.id} className="p-4 hover:bg-gray-50">
+                            <div className="flex justify-between items-start mb-2">
+                              <div>
+                                <span className="font-bold text-gray-900">{note.operator_name}</span>
+                                <span className="text-gray-500 text-sm ml-2">
+                                  {new Date(note.date).toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                                </span>
+                              </div>
+                              <span className="text-xs text-gray-400">
+                                {new Date(note.created_at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <p className="text-gray-700 whitespace-pre-wrap">{note.note}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           )}
 
@@ -3930,6 +3936,15 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
         )}
 
 
+
+        {/* Note Editor Modal */}
+        {showNoteEditor && (
+          <NoteEditor
+            onClose={() => setShowNoteEditor(false)}
+            onSave={saveDailyNote}
+            initialNote={dailyNote}
+          />
+        )}
 
         {/* Comment Modal */}
         {commentModal && (
