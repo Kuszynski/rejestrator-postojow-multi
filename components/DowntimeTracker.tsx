@@ -701,9 +701,10 @@ export default function DowntimeTracker() {
     const weekStart = monday.toISOString().split('T')[0];
     const weekEnd = sunday.toISOString().split('T')[0];
     
-    const weekDowntimes = downtimeHistory.filter(d => 
-      d.date >= weekStart && d.date <= weekEnd
-    );
+    const weekDowntimes = downtimeHistory.filter(d => {
+      const downtimeDate = new Date(d.startTime).toISOString().split('T')[0];
+      return downtimeDate >= weekStart && downtimeDate <= weekEnd;
+    });
     
     const dayStats = [];
     for (let i = 0; i < 7; i++) {
@@ -712,7 +713,10 @@ export default function DowntimeTracker() {
       const dayStr = currentDay.toISOString().split('T')[0];
       const dayName = currentDay.toLocaleDateString('nb-NO', { weekday: 'long' });
       
-      const dayDowntimes = weekDowntimes.filter(d => d.date === dayStr);
+      const dayDowntimes = weekDowntimes.filter(d => {
+        const downtimeDate = new Date(d.startTime).toISOString().split('T')[0];
+        return downtimeDate === dayStr;
+      });
       const pauseDowntimes = dayDowntimes.filter(d => d.machineName.toLowerCase().includes('pause'));
       const regularDowntimes = dayDowntimes.filter(d => !d.machineName.toLowerCase().includes('pause'));
       const totalDowntime = regularDowntimes.reduce((sum, d) => sum + d.duration, 0);
@@ -2519,7 +2523,13 @@ export default function DowntimeTracker() {
                         const weekStats = getWeekStats();
                         const weekDowntimes = downtimeHistory.filter(d => 
                           d.date >= weekStats.weekStart && d.date <= weekStats.weekEnd
-                        ).sort((a, b) => b.startTime - a.startTime);
+                        ).sort((a, b) => {
+                          // Sortuj najpierw po dacie, potem po czasie
+                          if (a.date !== b.date) {
+                            return a.date.localeCompare(b.date);
+                          }
+                          return a.startTime - b.startTime;
+                        });
                         
                         return weekDowntimes.map((d, index) => {
                           const machine = machines.find(m => m.name === d.machineName);
@@ -3301,7 +3311,6 @@ export default function DowntimeTracker() {
                   <tbody>
                     {downtimeHistory
                       .filter(d => d.date === new Date().toISOString().split('T')[0])
-                      .slice(0, 15)
                       .map((d, index) => {
                         const machine = machines.find(m => m.name === d.machineName);
                         return (

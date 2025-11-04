@@ -5,6 +5,60 @@ import { supabase } from '@/lib/supabase';
 import { User, Department, hasPermission, getDepartmentUsers, addUser } from '@/lib/auth';
 import { Play, Pause, Clock, TrendingUp, BarChart3, Calendar, LogOut, AlertCircle, CheckCircle, Edit2, Trash2, Eye, Download, Wrench, Building2, Camera } from 'lucide-react';
 
+function DowntimeCell({ start, end, isPause, departmentId }) {
+  const [value, setValue] = useState('...');
+  
+  useEffect(() => {
+    const fetchSum = async () => {
+      const { data } = await supabase
+        .from('downtimes')
+        .select('duration, comment')
+        .eq('department_id', departmentId)
+        .gte('start_time', start)
+        .lt('start_time', end);
+      
+      if (!data) { setValue('0 min'); return; }
+      
+      const sum = data
+        .filter(d => isPause ? d.comment.toLowerCase().includes('pause') : !d.comment.toLowerCase().includes('pause'))
+        .reduce((s, d) => s + d.duration, 0);
+      
+      setValue(sum + ' min');
+    };
+    fetchSum();
+  }, [start, end, isPause, departmentId]);
+  
+  return <>{value}</>;
+}
+
+function WeekTotalCell({ periods, isPause, departmentId }) {
+  const [value, setValue] = useState('...');
+  
+  useEffect(() => {
+    const fetchSum = async () => {
+      let total = 0;
+      for (const [start, end] of periods) {
+        const { data } = await supabase
+          .from('downtimes')
+          .select('duration, comment')
+          .eq('department_id', departmentId)
+          .gte('start_time', start)
+          .lt('start_time', end);
+        
+        if (data) {
+          total += data
+            .filter(d => isPause ? d.comment.toLowerCase().includes('pause') : !d.comment.toLowerCase().includes('pause'))
+            .reduce((s, d) => s + d.duration, 0);
+        }
+      }
+      setValue(total + ' min');
+    };
+    fetchSum();
+  }, [periods, isPause, departmentId]);
+  
+  return <>{value}</>;
+}
+
 interface Machine {
   id: string;
   name: string;
@@ -65,6 +119,11 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
   const [editMachineName, setEditMachineName] = useState('');
   const [dailyNote, setDailyNote] = useState('');
   const [dailyNotes, setDailyNotes] = useState([]);
+  const [editProductionRow, setEditProductionRow] = useState(null);
+  const [editProdData, setEditProdData] = useState({ antall: '', alt: '', snittLengde: '', spVol: '', utbytte: '' });
+  const [editingRow, setEditingRow] = useState(null);
+  const [editRowData, setEditRowData] = useState({});
+  const [savedProductionData, setSavedProductionData] = useState({});
 
   const today = new Date().toISOString().split('T')[0];
   const yesterday = new Date();
@@ -127,7 +186,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     if (view === 'history') {
       filterHistory();
     }
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, view, downtimeHistory]);
 
   // Timer for active downtimes
   useEffect(() => {
@@ -137,6 +196,30 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     
     return () => clearInterval(timer);
   }, []);
+
+  // Handle Escape key to close modals
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (editProductionRow) {
+          setEditProductionRow(null);
+        } else if (editModal) {
+          setEditModal(null);
+        } else if (commentModal) {
+          setCommentModal(null);
+          setComment('');
+          setPostNumber('');
+          setManualPostNumber('');
+        } else if (editMachine) {
+          setEditMachine(null);
+          setEditMachineName('');
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [editProductionRow, editModal, commentModal, editMachine]);
 
   const loadMachines = async () => {
     try {
@@ -402,8 +485,23 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     setEditModal(downtime);
     setEditComment(downtime.comment);
     setEditPostNumber(downtime.postNumber || '');
-    setEditStartTime(new Date(downtime.startTime).toISOString().slice(0, 16));
-    setEditEndTime(new Date(downtime.endTime).toISOString().slice(0, 16));
+    
+    // Format datetime-local correctly for local timezone
+    const startDate = new Date(downtime.startTime);
+    const endDate = new Date(downtime.endTime);
+    
+    // Convert to local datetime string format (YYYY-MM-DDTHH:mm)
+    const formatLocalDateTime = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${year}-${month}-${day}T${hours}:${minutes}`;
+    };
+    
+    setEditStartTime(formatLocalDateTime(startDate));
+    setEditEndTime(formatLocalDateTime(endDate));
     setEditMinutes(downtime.duration.toString());
     setEditImage(null);
     setEditImageUrl(downtime.imageUrl || '');
@@ -588,13 +686,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
     setFilteredHistory(downtimeHistory);
   };
 
-  const setYesterday = () => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-    setFromDate(yesterdayStr);
-    setToDate(yesterdayStr);
-  };
+
 
   const exportJSONBackup = async () => {
     try {
@@ -731,6 +823,46 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
       } catch (error) {
         alert('Uventet feil ved sletting');
       }
+    }
+  };
+
+
+
+  const saveProductionData = async (rowId, data) => {
+    try {
+      const { error } = await supabase
+        .from('production_data')
+        .upsert({
+          id: rowId,
+          department_id: user.departmentId,
+          dag: rowId.split('-')[0],
+          dato: rowId.includes('mandag') ? '2024-11-03' : '2024-11-04',
+          post_nr: rowId.split('-')[1],
+          antall: data.antall ? parseInt(data.antall) : null,
+          alt: data.alt ? parseFloat(data.alt) : null,
+          snitt_lengde: data.snittLengde ? parseFloat(data.snittLengde) : null,
+          sp_vol: data.spVol ? parseFloat(data.spVol) : null,
+          utbytte: data.utbytte ? parseFloat(data.utbytte) : null,
+          updated_at: new Date().toISOString(),
+          updated_by: user.id
+        });
+
+      if (error) {
+        console.error('Error saving production data:', error);
+        alert('Feil ved lagring av produksjonsdata');
+        return false;
+      }
+
+      setSavedProductionData(prev => ({
+        ...prev,
+        [rowId]: data
+      }));
+
+      return true;
+    } catch (error) {
+      console.error('Unexpected error:', error);
+      alert('Uventet feil ved lagring');
+      return false;
     }
   };
 
@@ -1025,7 +1157,19 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
               }`}
             >
               <BarChart3 className="w-4 h-4" />
-              Uke rapport
+              Denne uken
+            </button>
+            
+            <button
+              onClick={() => setView('ukerapport-simple')}
+              className={`flex items-center gap-1 px-3 py-2 rounded-lg font-medium transition-all duration-200 flex-1 justify-center text-sm ${
+                view === 'ukerapport-simple' 
+                  ? 'bg-white text-blue-600 shadow-lg' 
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              Ukerapport
             </button>
             
             {(user.role === 'manager' || user.role === 'admin' || user.role === 'super') && (
@@ -1410,6 +1554,326 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
             </div>
           )}
 
+          {view === 'ukerapport-simple' && (
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-purple-600 to-purple-700 rounded-2xl shadow-xl p-6 text-white">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h2 className="text-2xl font-bold mb-2">Ukerapport</h2>
+                    <div className="flex items-center gap-4">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold">{(() => {
+                          const periods = [
+                            ['2025-11-03T06:00:00', '2025-11-03T09:02:00'],
+                            ['2025-11-03T09:02:00', '2025-11-04T06:00:00'],
+                            ['2025-11-04T06:00:00', '2025-11-04T18:06:00'],
+                            ['2025-11-04T18:06:00', '2025-11-04T19:31:00'],
+                            ['2025-11-04T19:31:00', '2025-11-05T00:00:00']
+                          ];
+                          return downtimeHistory.filter(d => {
+                            const startTime = new Date(d.startTime).toISOString();
+                            return periods.some(([start, end]) => startTime >= start && startTime < end);
+                          }).length;
+                        })()}</div>
+                        <div className="text-purple-100 text-sm">stanser</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold">{(() => {
+                          const periods = [
+                            ['2025-11-03T06:00:00', '2025-11-03T09:02:00'],
+                            ['2025-11-03T09:02:00', '2025-11-04T06:00:00'],
+                            ['2025-11-04T06:00:00', '2025-11-04T18:06:00'],
+                            ['2025-11-04T18:06:00', '2025-11-04T19:31:00'],
+                            ['2025-11-04T19:31:00', '2025-11-05T00:00:00']
+                          ];
+                          return downtimeHistory.filter(d => {
+                            const startTime = new Date(d.startTime).toISOString();
+                            return periods.some(([start, end]) => startTime >= start && startTime < end);
+                          }).reduce((sum, d) => sum + d.duration, 0);
+                        })()}</div>
+                        <div className="text-purple-100 text-sm">min total</div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => {
+                            const csvContent = [
+                              ['Dag', 'Dato', 'Post nr', 'Start omposting', 'Stop omposting', 'Stop tid', 'Mat pause'],
+                              ['Mandag', '3.11.', '23453', '06:00', '09:02', '', ''],
+                              ['Mandag', '3.11.', '108018', '09:02', '06:00', '', ''],
+                              ['Tirsdag', '4.11.', '108018', '23:20', '18:06', '', ''],
+                              ['Tirsdag', '4.11.', '31118', '18:06', '19:31', '', ''],
+                              ['Tirsdag', '4.11.', '45678', '19:31', '-', '', '']
+                            ].map(row => row.join(',')).join('\n');
+                            
+                            const blob = new Blob([csvContent], { type: 'text/csv' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `ukerapport-${new Date().toISOString().split('T')[0]}.csv`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-sm font-medium transition-colors"
+                        >
+                          Excel
+                        </button>
+                        <button 
+                          onClick={() => window.print()}
+                          className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-medium transition-colors"
+                        >
+                          📄 PDF
+                        </button>
+                        <button 
+                          onClick={async () => {
+                            if (confirm('Lagre hele uken til database?')) {
+                              const weekData = [
+                                { id: 'mandag-23453', dag: 'Mandag', dato: '2024-11-03', post_nr: '23453' },
+                                { id: 'mandag-108018', dag: 'Mandag', dato: '2024-11-03', post_nr: '108018' },
+                                { id: 'tirsdag-108018', dag: 'Tirsdag', dato: '2024-11-04', post_nr: '108018' },
+                                { id: 'tirsdag-31118', dag: 'Tirsdag', dato: '2024-11-04', post_nr: '31118' },
+                                { id: 'tirsdag-45678', dag: 'Tirsdag', dato: '2024-11-04', post_nr: '45678' }
+                              ];
+                              
+                              let success = true;
+                              for (const row of weekData) {
+                                const result = await saveProductionData(row.id, {});
+                                if (!result) success = false;
+                              }
+                              
+                              if (success) {
+                                alert('Uke lagret!');
+                              }
+                            }
+                          }}
+                          className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm font-medium transition-colors"
+                        >
+                          💾 Lagre uke
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left p-3 font-semibold text-gray-700">Dag</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Dato</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Post nr</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Antall</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">ALT</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Snitt lengde</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Sp vol l/stl</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Utbytte</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Start omposting</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Stop omposting</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Stop tid</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Mat pause</th>
+                        <th className="text-left p-3 font-semibold text-gray-700">Handling</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b hover:bg-gray-50">
+                        <td className="p-3 font-medium">Mandag</td>
+                        <td className="p-3">3.11.</td>
+                        <td className="p-3 font-bold">23453</td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-23453' ? (
+                            <input type="number" value={editRowData.antall || ''} onChange={(e) => setEditRowData({...editRowData, antall: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : (savedProductionData['mandag-23453']?.antall || '-')}
+                        </td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-23453' ? (
+                            <input type="number" value={editRowData.alt || ''} onChange={(e) => setEditRowData({...editRowData, alt: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : (savedProductionData['mandag-23453']?.alt || '-')}
+                        </td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-23453' ? (
+                            <input type="number" value={editRowData.snittLengde || ''} onChange={(e) => setEditRowData({...editRowData, snittLengde: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : (savedProductionData['mandag-23453']?.snittLengde || '-')}
+                        </td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-23453' ? (
+                            <input type="number" value={editRowData.spVol || ''} onChange={(e) => setEditRowData({...editRowData, spVol: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : (savedProductionData['mandag-23453']?.spVol || '-')}
+                        </td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-23453' ? (
+                            <input type="number" value={editRowData.utbytte || ''} onChange={(e) => setEditRowData({...editRowData, utbytte: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : (savedProductionData['mandag-23453']?.utbytte || '-')}
+                        </td>
+                        <td className="p-3">06:00</td>
+                        <td className="p-3">09:02</td>
+                        <td className="p-3"><DowntimeCell start="2025-11-03T06:00:00" end="2025-11-03T09:02:00" isPause={false} departmentId={user.departmentId} /></td>
+                        <td className="p-3"><DowntimeCell start="2025-11-03T06:00:00" end="2025-11-03T09:02:00" isPause={true} departmentId={user.departmentId} /></td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-23453' ? (
+                            <div className="flex gap-1">
+                              <button onClick={async () => { 
+                                const success = await saveProductionData('mandag-23453', editRowData);
+                                if (success) {
+                                  setEditingRow(null); 
+                                  setEditRowData({}); 
+                                }
+                              }} className="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs">✓</button>
+                              <button onClick={() => { setEditingRow(null); setEditRowData({}); }} className="px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs">✕</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => { setEditingRow('mandag-23453'); setEditRowData({}); }} className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
+                              Rediger
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      <tr className="border-b hover:bg-gray-50">
+                        <td className="p-3 font-medium">Mandag</td>
+                        <td className="p-3">3.11.</td>
+                        <td className="p-3 font-bold">108018</td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-108018' ? (
+                            <input type="number" value={editRowData.antall || ''} onChange={(e) => setEditRowData({...editRowData, antall: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : '-'}
+                        </td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-108018' ? (
+                            <input type="number" value={editRowData.alt || ''} onChange={(e) => setEditRowData({...editRowData, alt: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : '-'}
+                        </td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-108018' ? (
+                            <input type="number" value={editRowData.snittLengde || ''} onChange={(e) => setEditRowData({...editRowData, snittLengde: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : '-'}
+                        </td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-108018' ? (
+                            <input type="number" value={editRowData.spVol || ''} onChange={(e) => setEditRowData({...editRowData, spVol: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : '-'}
+                        </td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-108018' ? (
+                            <input type="number" value={editRowData.utbytte || ''} onChange={(e) => setEditRowData({...editRowData, utbytte: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
+                          ) : '-'}
+                        </td>
+                        <td className="p-3">09:02</td>
+                        <td className="p-3">06:00</td>
+                        <td className="p-3"><DowntimeCell start="2025-11-03T09:02:00" end="2025-11-04T06:00:00" isPause={false} departmentId={user.departmentId} /></td>
+                        <td className="p-3"><DowntimeCell start="2025-11-03T09:02:00" end="2025-11-04T06:00:00" isPause={true} departmentId={user.departmentId} /></td>
+                        <td className="p-3">
+                          {editingRow === 'mandag-108018' ? (
+                            <div className="flex gap-1">
+                              <button onClick={async () => { 
+                                const success = await saveProductionData('mandag-108018', editRowData);
+                                if (success) {
+                                  setEditingRow(null); 
+                                  setEditRowData({}); 
+                                }
+                              }} className="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs">✓</button>
+                              <button onClick={() => { setEditingRow(null); setEditRowData({}); }} className="px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs">✕</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => { setEditingRow('mandag-108018'); setEditRowData({}); }} className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
+                              Rediger
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      <tr className="border-b hover:bg-gray-50">
+                        <td className="p-3 font-medium">Tirsdag</td>
+                        <td className="p-3">4.11.</td>
+                        <td className="p-3 font-bold">108018</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">23:20</td>
+                        <td className="p-3">18:06</td>
+                        <td className="p-3"><DowntimeCell start="2025-11-04T06:00:00" end="2025-11-04T18:06:00" isPause={false} departmentId={user.departmentId} /></td>
+                        <td className="p-3"><DowntimeCell start="2025-11-04T06:00:00" end="2025-11-04T18:06:00" isPause={true} departmentId={user.departmentId} /></td>
+                        <td className="p-3">
+                          <button className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
+                            Rediger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="border-b hover:bg-gray-50">
+                        <td className="p-3 font-medium">Tirsdag</td>
+                        <td className="p-3">4.11.</td>
+                        <td className="p-3 font-bold">31118</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">18:06</td>
+                        <td className="p-3">19:31</td>
+                        <td className="p-3"><DowntimeCell start="2025-11-04T18:06:00" end="2025-11-04T19:31:00" isPause={false} departmentId={user.departmentId} /></td>
+                        <td className="p-3"><DowntimeCell start="2025-11-04T18:06:00" end="2025-11-04T19:31:00" isPause={true} departmentId={user.departmentId} /></td>
+                        <td className="p-3">
+                          <button className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
+                            Rediger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="border-b hover:bg-gray-50">
+                        <td className="p-3 font-medium">Tirsdag</td>
+                        <td className="p-3">4.11.</td>
+                        <td className="p-3 font-bold">45678</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3">19:31</td>
+                        <td className="p-3">-</td>
+                        <td className="p-3"><DowntimeCell start="2025-11-04T19:31:00" end="2025-11-05T00:00:00" isPause={false} departmentId={user.departmentId} /></td>
+                        <td className="p-3"><DowntimeCell start="2025-11-04T19:31:00" end="2025-11-05T00:00:00" isPause={true} departmentId={user.departmentId} /></td>
+                        <td className="p-3">
+                          <button className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
+                            Rediger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="border-b-2 border-gray-400 bg-gray-50 font-bold">
+                        <td className="p-3" colSpan={10}>UKE TOTALT:</td>
+                        <td className="p-3 text-center text-lg text-red-600">
+                          <WeekTotalCell 
+                            periods={[
+                              ['2025-11-03T06:00:00', '2025-11-03T09:02:00'],
+                              ['2025-11-03T09:02:00', '2025-11-04T06:00:00'],
+                              ['2025-11-04T06:00:00', '2025-11-04T18:06:00'],
+                              ['2025-11-04T18:06:00', '2025-11-04T19:31:00'],
+                              ['2025-11-04T19:31:00', '2025-11-05T00:00:00']
+                            ]}
+                            isPause={false}
+                            departmentId={user.departmentId}
+                          />
+                        </td>
+                        <td className="p-3 text-center text-lg text-orange-600">
+                          <WeekTotalCell 
+                            periods={[
+                              ['2025-11-03T06:00:00', '2025-11-03T09:02:00'],
+                              ['2025-11-03T09:02:00', '2025-11-04T06:00:00'],
+                              ['2025-11-04T06:00:00', '2025-11-04T18:06:00'],
+                              ['2025-11-04T18:06:00', '2025-11-04T19:31:00'],
+                              ['2025-11-04T19:31:00', '2025-11-05T00:00:00']
+                            ]}
+                            isPause={true}
+                            departmentId={user.departmentId}
+                          />
+                        </td>
+                        <td className="p-3"></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
           {view === 'ukerapport' && (
             <div className="space-y-6">
               {/* Header */}
@@ -1425,11 +1889,16 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                           const dayOfWeek = today.getDay();
                           const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
                           weekStart.setDate(today.getDate() + daysToMonday);
+                          weekStart.setHours(0, 0, 0, 0);
                           const weekEnd = new Date(weekStart);
                           weekEnd.setDate(weekEnd.getDate() + 6);
+                          weekEnd.setHours(23, 59, 59, 999);
                           return downtimeHistory.filter(d => {
                             const entryDate = new Date(d.endTime || d.startTime);
-                            return entryDate >= weekStart && entryDate <= weekEnd;
+                            const entryDateOnly = new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate());
+                            const weekStartOnly = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+                            const weekEndOnly = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());
+                            return entryDateOnly >= weekStartOnly && entryDateOnly <= weekEndOnly;
                           }).length;
                         })()}</div>
                         <div className="text-purple-100 text-sm">stanser</div>
@@ -1441,12 +1910,18 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                           const dayOfWeek = today.getDay();
                           const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
                           weekStart.setDate(today.getDate() + daysToMonday);
+                          weekStart.setHours(0, 0, 0, 0);
                           const weekEnd = new Date(weekStart);
                           weekEnd.setDate(weekEnd.getDate() + 6);
-                          return downtimeHistory.filter(d => {
+                          weekEnd.setHours(23, 59, 59, 999);
+                          const weekDowntimes = downtimeHistory.filter(d => {
                             const entryDate = new Date(d.endTime || d.startTime);
-                            return entryDate >= weekStart && entryDate <= weekEnd;
-                          }).reduce((sum, d) => sum + d.duration, 0);
+                            const entryDateOnly = new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate());
+                            const weekStartOnly = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+                            const weekEndOnly = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());
+                            return entryDateOnly >= weekStartOnly && entryDateOnly <= weekEndOnly;
+                          });
+                          return weekDowntimes.reduce((sum, d) => sum + d.duration, 0);
                         })()}</div>
                         <div className="text-purple-100 text-sm">min total</div>
                       </div>
@@ -1458,12 +1933,17 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                             const dayOfWeek = today.getDay();
                             const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
                             weekStart.setDate(today.getDate() + daysToMonday);
+                            weekStart.setHours(0, 0, 0, 0);
                             const weekEnd = new Date(weekStart);
                             weekEnd.setDate(weekEnd.getDate() + 6);
+                            weekEnd.setHours(23, 59, 59, 999);
                             
                             const weekDowntimes = downtimeHistory.filter(d => {
                               const entryDate = new Date(d.endTime || d.startTime);
-                              return entryDate >= weekStart && entryDate <= weekEnd;
+                              const entryDateOnly = new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate());
+                              const weekStartOnly = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+                              const weekEndOnly = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());
+                              return entryDateOnly >= weekStartOnly && entryDateOnly <= weekEndOnly;
                             });
                             
                             const csvContent = [
@@ -1504,72 +1984,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                 </div>
               </div>
               
-              {/* Tygodniowa tabela */}
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-gray-50 border-b">
-                        <th className="text-left p-3 font-semibold text-gray-700">Dag</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Dato</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Antall Stanser</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Stansetid</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Gjennomsnitt</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Pause</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(() => {
-                        const today = new Date();
-                        const weekStart = new Date(today);
-                        const dayOfWeek = today.getDay();
-                        const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-                        weekStart.setDate(today.getDate() + daysToMonday);
-                        const days = ['Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag', 'Søndag'];
-                        let weekTotal = { stanser: 0, tid: 0 };
-                        
-                        return days.map((day, index) => {
-                          const currentDate = new Date(weekStart);
-                          currentDate.setDate(weekStart.getDate() + index);
-                          const dateStr = currentDate.toISOString().split('T')[0];
-                          
-                          const dayDowntimes = downtimeHistory.filter(d => {
-                            const entryDate = new Date(d.endTime || d.startTime).toISOString().split('T')[0];
-                            return entryDate === dateStr;
-                          });
-                          
-                          const stanser = dayDowntimes.length;
-                          const tid = dayDowntimes.reduce((sum, d) => sum + d.duration, 0);
-                          const gjennomsnitt = stanser > 0 ? Math.round(tid / stanser) : 0;
-                          
-                          weekTotal.stanser += stanser;
-                          weekTotal.tid += tid;
-                          
-                          return (
-                            <tr key={day} className="border-b">
-                              <td className="p-3 font-medium">{day}</td>
-                              <td className="p-3">{currentDate.toLocaleDateString('nb-NO', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
-                              <td className="p-3">{stanser}</td>
-                              <td className="p-3">{tid} min</td>
-                              <td className="p-3">{gjennomsnitt} min</td>
-                              <td className="p-3">0 min</td>
-                            </tr>
-                          );
-                        }).concat([
-                          <tr key="total" className="border-b-2 border-gray-400 bg-gray-50 font-bold">
-                            <td className="p-3">UKE TOTALT:</td>
-                            <td className="p-3">-</td>
-                            <td className="p-3">{weekTotal.stanser}</td>
-                            <td className="p-3">{weekTotal.tid} min</td>
-                            <td className="p-3">{weekTotal.stanser > 0 ? Math.round(weekTotal.tid / weekTotal.stanser) : 0} min</td>
-                            <td className="p-3">0 min</td>
-                          </tr>
-                        ]);
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+
               
               {/* Detaljerte stanser */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
@@ -1583,12 +1998,17 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                   const dayOfWeek = today.getDay();
                   const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
                   weekStart.setDate(today.getDate() + daysToMonday);
+                  weekStart.setHours(0, 0, 0, 0);
                   const weekEnd = new Date(weekStart);
                   weekEnd.setDate(weekEnd.getDate() + 6);
+                  weekEnd.setHours(23, 59, 59, 999);
                   
                   const weekDowntimes = downtimeHistory.filter(d => {
                     const entryDate = new Date(d.endTime || d.startTime);
-                    return entryDate >= weekStart && entryDate <= weekEnd;
+                    const entryDateOnly = new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate());
+                    const weekStartOnly = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+                    const weekEndOnly = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());
+                    return entryDateOnly >= weekStartOnly && entryDateOnly <= weekEndOnly;
                   });
                   
                   return weekDowntimes.length === 0 ? (
@@ -1612,6 +2032,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                             <th className="text-left p-4 font-semibold text-gray-700">Varighet</th>
                             <th className="text-left p-4 font-semibold text-gray-700">Post Nr</th>
                             <th className="text-left p-4 font-semibold text-gray-700">Operatør</th>
+                            <th className="text-left p-4 font-semibold text-gray-700">Handlinger</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1664,9 +2085,36 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                                 <td className="p-4">
                                   <div className="text-sm text-gray-600">{d.operatorName}</div>
                                 </td>
+                                <td className="p-4">
+                                  <div className="flex gap-1">
+                                    <button 
+                                      onClick={() => editDowntime(d)}
+                                      className="p-1 text-blue-600 hover:bg-blue-50 rounded" 
+                                      title="Rediger"
+                                    >
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                    <button 
+                                      onClick={() => deleteDowntime(d)}
+                                      className="p-1 text-red-600 hover:bg-red-50 rounded" 
+                                      title="Slett"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </td>
                               </tr>
                             );
                           })}
+                          <tr className="border-t-2 border-gray-400 bg-gray-50 font-bold">
+                            <td className="p-4" colSpan={5}>TOTALT:</td>
+                            <td className="p-4">
+                              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm font-bold">
+                                {weekDowntimes.reduce((sum, d) => sum + d.duration, 0)} min
+                              </span>
+                            </td>
+                            <td className="p-4" colSpan={3}></td>
+                          </tr>
                         </tbody>
                       </table>
                     </div>
@@ -1697,12 +2145,17 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                         const dayOfWeek = today.getDay();
                         const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
                         weekStart.setDate(today.getDate() + daysToMonday);
+                        weekStart.setHours(0, 0, 0, 0);
                         const weekEnd = new Date(weekStart);
                         weekEnd.setDate(weekEnd.getDate() + 6);
+                        weekEnd.setHours(23, 59, 59, 999);
                         
                         const weekDowntimes = downtimeHistory.filter(d => {
                           const entryDate = new Date(d.endTime || d.startTime);
-                          return entryDate >= weekStart && entryDate <= weekEnd;
+                          const entryDateOnly = new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate());
+                          const weekStartOnly = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+                          const weekEndOnly = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());
+                          return entryDateOnly >= weekStartOnly && entryDateOnly <= weekEndOnly;
                         });
                         
                         const machineStats = {};
@@ -1797,6 +2250,123 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                   </div>
                 </div>
               </div>
+              
+              {/* Edit Production Modal - inline under table */}
+              {editProductionRow && (
+                <div className="bg-white rounded-2xl shadow-xl border-2 border-purple-500 p-6 mt-6">
+                  <div className="bg-gradient-to-r from-purple-500 to-purple-600 text-white p-4 rounded-xl mb-4">
+                    <h3 className="text-lg font-bold mb-1">✏️ Rediger produksjonsdata</h3>
+                    <p className="text-purple-100">{editProductionRow.dayName} - {editProductionRow.date} | Post: {editProductionRow.postNr}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">Antall</label>
+                      <input
+                        type="number"
+                        value={editProdData.antall}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || /^\d+$/.test(value)) {
+                            setEditProdData({...editProdData, antall: value});
+                          }
+                        }}
+                        placeholder="0"
+                        min="0"
+                        step="1"
+                        className="w-full px-3 py-2 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">ALT</label>
+                      <input
+                        type="number"
+                        value={editProdData.alt}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                            setEditProdData({...editProdData, alt: value});
+                          }
+                        }}
+                        placeholder="0.0"
+                        min="0"
+                        step="0.1"
+                        className="w-full px-3 py-2 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">Snitt lengde</label>
+                      <input
+                        type="number"
+                        value={editProdData.snittLengde}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                            setEditProdData({...editProdData, snittLengde: value});
+                          }
+                        }}
+                        placeholder="0.0"
+                        min="0"
+                        step="0.1"
+                        className="w-full px-3 py-2 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">Sp vol l/stl</label>
+                      <input
+                        type="number"
+                        value={editProdData.spVol}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                            setEditProdData({...editProdData, spVol: value});
+                          }
+                        }}
+                        placeholder="0.0"
+                        min="0"
+                        step="0.1"
+                        className="w-full px-3 py-2 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">Utbytte</label>
+                      <input
+                        type="number"
+                        value={editProdData.utbytte}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                            setEditProdData({...editProdData, utbytte: value});
+                          }
+                        }}
+                        placeholder="0.0"
+                        min="0"
+                        step="0.1"
+                        className="w-full px-3 py-2 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        alert('Lagring av produksjonsdata kommer snart!');
+                        setEditProductionRow(null);
+                      }}
+                      className="px-6 py-3 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl transition-all duration-200 font-bold"
+                    >
+                      ✅ LAGRE ENDRINGER
+                    </button>
+                    
+                    <button
+                      onClick={() => setEditProductionRow(null)}
+                      className="px-6 py-3 border-2 border-gray-300 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium text-gray-700"
+                    >
+                      ❌ Avbryt
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2621,7 +3191,13 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                       Tøm
                     </button>
                     <button
-                      onClick={setYesterday}
+                      onClick={() => {
+                        const yesterday = new Date();
+                        yesterday.setDate(yesterday.getDate() - 1);
+                        const yesterdayStr = yesterday.toISOString().split('T')[0];
+                        setFromDate(yesterdayStr);
+                        setToDate(yesterdayStr);
+                      }}
                       className="px-4 py-3 bg-purple-500 hover:bg-purple-600 text-white rounded-xl font-bold transition-all"
                     >
                       I går
@@ -3170,9 +3746,19 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
             </div>
           )}
 
+
+
           {/* Edit Machine Modal */}
           {editMachine && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <div 
+              className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) {
+                  setEditMachine(null);
+                  setEditMachineName('');
+                }
+              }}
+            >
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
                 <div className="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-6 rounded-t-2xl">
                   <h2 className="text-xl font-bold mb-2">✏️ Rediger maskin</h2>
@@ -3217,7 +3803,14 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
 
         {/* Edit Modal */}
         {editModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setEditModal(null);
+              }
+            }}
+          >
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
               <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-t-2xl">
                 <h2 className="text-xl font-bold mb-2">✏️ Rediger stans</h2>
@@ -3336,9 +3929,21 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
           </div>
         )}
 
+
+
         {/* Comment Modal */}
         {commentModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setCommentModal(null);
+                setComment('');
+                setPostNumber('');
+                setManualPostNumber('');
+              }
+            }}
+          >
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
               <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-t-2xl">
                 <h2 className="text-xl font-bold mb-2">🛑 Avslutt stans</h2>
