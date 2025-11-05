@@ -100,7 +100,7 @@ export default function DowntimeTracker() {
   };
 
   useEffect(() => {
-    if (user?.role === 'operator') {
+    if (user?.role === 'operator' || user?.role === 'admin') {
       const interval = setInterval(() => {
         setActiveDowntimes(prev => [...prev]);
       }, 1000);
@@ -108,12 +108,12 @@ export default function DowntimeTracker() {
     }
   }, [user]);
 
-  // Auto-refresh data for managers and viewers
+  // Auto-refresh data for all users
   useEffect(() => {
-    if (user?.role === 'manager' || user?.role === 'admin' || user?.role === 'viewer') {
+    if (user) {
       const interval = setInterval(() => {
         loadData();
-      }, user?.role === 'viewer' ? 5000 : 10000); // Viewers refresh every 5 seconds, managers every 10
+      }, user?.role === 'viewer' ? 5000 : 10000); // Viewers refresh every 5 seconds, others every 10
       return () => clearInterval(interval);
     }
   }, [user, machines, users]);
@@ -693,17 +693,20 @@ export default function DowntimeTracker() {
 
   const getWeekStats = () => {
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayOfWeek = today.getDay();
     const monday = new Date(today);
-    monday.setDate(today.getDate() - today.getDay() + 1); // Poniedziałek
+    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    monday.setDate(today.getDate() - daysFromMonday);
     const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6); // Niedziela
+    sunday.setDate(monday.getDate() + 6);
     
     const weekStart = monday.toISOString().split('T')[0];
     const weekEnd = sunday.toISOString().split('T')[0];
     
+    // Używamy d.date zamiast konwersji d.startTime
     const weekDowntimes = downtimeHistory.filter(d => {
-      const downtimeDate = new Date(d.startTime).toISOString().split('T')[0];
-      return downtimeDate >= weekStart && downtimeDate <= weekEnd;
+      return d.date >= weekStart && d.date <= weekEnd;
     });
     
     const dayStats = [];
@@ -713,10 +716,8 @@ export default function DowntimeTracker() {
       const dayStr = currentDay.toISOString().split('T')[0];
       const dayName = currentDay.toLocaleDateString('nb-NO', { weekday: 'long' });
       
-      const dayDowntimes = weekDowntimes.filter(d => {
-        const downtimeDate = new Date(d.startTime).toISOString().split('T')[0];
-        return downtimeDate === dayStr;
-      });
+      // Używamy d.date zamiast konwersji d.startTime
+      const dayDowntimes = weekDowntimes.filter(d => d.date === dayStr);
       const pauseDowntimes = dayDowntimes.filter(d => d.machineName.toLowerCase().includes('pause'));
       const regularDowntimes = dayDowntimes.filter(d => !d.machineName.toLowerCase().includes('pause'));
       const totalDowntime = regularDowntimes.reduce((sum, d) => sum + d.duration, 0);

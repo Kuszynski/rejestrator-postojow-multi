@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { User, Department, hasPermission, getDepartmentUsers, addUser } from '@/lib/auth';
 import { Play, Pause, Clock, TrendingUp, BarChart3, Calendar, LogOut, AlertCircle, CheckCircle, Edit2, Trash2, Eye, Download, Wrench, Building2, Camera } from 'lucide-react';
 import NoteEditor from './NoteEditor';
+import DynamicWeekTable from './DynamicWeekTable';
 
 function DowntimeCell({ start, end, isPause, departmentId }) {
   const [value, setValue] = useState('...');
@@ -1649,220 +1650,17 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
               </div>
               
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-gray-50 border-b">
-                        <th className="text-left p-3 font-semibold text-gray-700">Dag</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Dato</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Post nr</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Antall</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">ALT</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Snitt lengde</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Sp vol l/stl</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Utbytte</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Start omposting</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Stop omposting</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Stop tid</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Mat pause</th>
-                        <th className="text-left p-3 font-semibold text-gray-700">Handling</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="border-b hover:bg-gray-50">
-                        <td className="p-3 font-medium">Mandag</td>
-                        <td className="p-3">3.11.</td>
-                        <td className="p-3 font-bold">23453</td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-23453' ? (
-                            <input type="number" value={editRowData.antall || ''} onChange={(e) => setEditRowData({...editRowData, antall: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : (savedProductionData['mandag-23453']?.antall || '-')}
-                        </td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-23453' ? (
-                            <input type="number" value={editRowData.alt || ''} onChange={(e) => setEditRowData({...editRowData, alt: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : (savedProductionData['mandag-23453']?.alt || '-')}
-                        </td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-23453' ? (
-                            <input type="number" value={editRowData.snittLengde || ''} onChange={(e) => setEditRowData({...editRowData, snittLengde: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : (savedProductionData['mandag-23453']?.snittLengde || '-')}
-                        </td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-23453' ? (
-                            <input type="number" value={editRowData.spVol || ''} onChange={(e) => setEditRowData({...editRowData, spVol: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : (savedProductionData['mandag-23453']?.spVol || '-')}
-                        </td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-23453' ? (
-                            <input type="number" value={editRowData.utbytte || ''} onChange={(e) => setEditRowData({...editRowData, utbytte: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : (savedProductionData['mandag-23453']?.utbytte || '-')}
-                        </td>
-                        <td className="p-3">06:00</td>
-                        <td className="p-3">09:02</td>
-                        <td className="p-3"><DowntimeCell start="2025-11-03T06:00:00" end="2025-11-03T09:02:00" isPause={false} departmentId={user.departmentId} /></td>
-                        <td className="p-3"><DowntimeCell start="2025-11-03T06:00:00" end="2025-11-03T09:02:00" isPause={true} departmentId={user.departmentId} /></td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-23453' ? (
-                            <div className="flex gap-1">
-                              <button onClick={async () => { 
-                                const success = await saveProductionData('mandag-23453', editRowData);
-                                if (success) {
-                                  setEditingRow(null); 
-                                  setEditRowData({}); 
-                                }
-                              }} className="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs">✓</button>
-                              <button onClick={() => { setEditingRow(null); setEditRowData({}); }} className="px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs">✕</button>
-                            </div>
-                          ) : (
-                            <button onClick={() => { setEditingRow('mandag-23453'); setEditRowData({}); }} className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
-                              Rediger
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                      <tr className="border-b hover:bg-gray-50">
-                        <td className="p-3 font-medium">Mandag</td>
-                        <td className="p-3">3.11.</td>
-                        <td className="p-3 font-bold">108018</td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-108018' ? (
-                            <input type="number" value={editRowData.antall || ''} onChange={(e) => setEditRowData({...editRowData, antall: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : '-'}
-                        </td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-108018' ? (
-                            <input type="number" value={editRowData.alt || ''} onChange={(e) => setEditRowData({...editRowData, alt: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : '-'}
-                        </td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-108018' ? (
-                            <input type="number" value={editRowData.snittLengde || ''} onChange={(e) => setEditRowData({...editRowData, snittLengde: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : '-'}
-                        </td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-108018' ? (
-                            <input type="number" value={editRowData.spVol || ''} onChange={(e) => setEditRowData({...editRowData, spVol: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : '-'}
-                        </td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-108018' ? (
-                            <input type="number" value={editRowData.utbytte || ''} onChange={(e) => setEditRowData({...editRowData, utbytte: e.target.value})} className="w-16 px-1 py-1 border rounded text-xs" placeholder="0" />
-                          ) : '-'}
-                        </td>
-                        <td className="p-3">09:02</td>
-                        <td className="p-3">06:00</td>
-                        <td className="p-3"><DowntimeCell start="2025-11-03T09:02:00" end="2025-11-04T06:00:00" isPause={false} departmentId={user.departmentId} /></td>
-                        <td className="p-3"><DowntimeCell start="2025-11-03T09:02:00" end="2025-11-04T06:00:00" isPause={true} departmentId={user.departmentId} /></td>
-                        <td className="p-3">
-                          {editingRow === 'mandag-108018' ? (
-                            <div className="flex gap-1">
-                              <button onClick={async () => { 
-                                const success = await saveProductionData('mandag-108018', editRowData);
-                                if (success) {
-                                  setEditingRow(null); 
-                                  setEditRowData({}); 
-                                }
-                              }} className="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs">✓</button>
-                              <button onClick={() => { setEditingRow(null); setEditRowData({}); }} className="px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs">✕</button>
-                            </div>
-                          ) : (
-                            <button onClick={() => { setEditingRow('mandag-108018'); setEditRowData({}); }} className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
-                              Rediger
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                      <tr className="border-b hover:bg-gray-50">
-                        <td className="p-3 font-medium">Tirsdag</td>
-                        <td className="p-3">4.11.</td>
-                        <td className="p-3 font-bold">108018</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">23:20</td>
-                        <td className="p-3">18:06</td>
-                        <td className="p-3"><DowntimeCell start="2025-11-04T06:00:00" end="2025-11-04T18:06:00" isPause={false} departmentId={user.departmentId} /></td>
-                        <td className="p-3"><DowntimeCell start="2025-11-04T06:00:00" end="2025-11-04T18:06:00" isPause={true} departmentId={user.departmentId} /></td>
-                        <td className="p-3">
-                          <button className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
-                            Rediger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="border-b hover:bg-gray-50">
-                        <td className="p-3 font-medium">Tirsdag</td>
-                        <td className="p-3">4.11.</td>
-                        <td className="p-3 font-bold">31118</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">18:06</td>
-                        <td className="p-3">19:31</td>
-                        <td className="p-3"><DowntimeCell start="2025-11-04T18:06:00" end="2025-11-04T19:31:00" isPause={false} departmentId={user.departmentId} /></td>
-                        <td className="p-3"><DowntimeCell start="2025-11-04T18:06:00" end="2025-11-04T19:31:00" isPause={true} departmentId={user.departmentId} /></td>
-                        <td className="p-3">
-                          <button className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
-                            Rediger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="border-b hover:bg-gray-50">
-                        <td className="p-3 font-medium">Tirsdag</td>
-                        <td className="p-3">4.11.</td>
-                        <td className="p-3 font-bold">45678</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3">19:31</td>
-                        <td className="p-3">-</td>
-                        <td className="p-3"><DowntimeCell start="2025-11-04T19:31:00" end="2025-11-05T00:00:00" isPause={false} departmentId={user.departmentId} /></td>
-                        <td className="p-3"><DowntimeCell start="2025-11-04T19:31:00" end="2025-11-05T00:00:00" isPause={true} departmentId={user.departmentId} /></td>
-                        <td className="p-3">
-                          <button className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs">
-                            Rediger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="border-b-2 border-gray-400 bg-gray-50 font-bold">
-                        <td className="p-3" colSpan={10}>UKE TOTALT:</td>
-                        <td className="p-3 text-center text-lg text-red-600">
-                          <WeekTotalCell 
-                            periods={[
-                              ['2025-11-03T06:00:00', '2025-11-03T09:02:00'],
-                              ['2025-11-03T09:02:00', '2025-11-04T06:00:00'],
-                              ['2025-11-04T06:00:00', '2025-11-04T18:06:00'],
-                              ['2025-11-04T18:06:00', '2025-11-04T19:31:00'],
-                              ['2025-11-04T19:31:00', '2025-11-05T00:00:00']
-                            ]}
-                            isPause={false}
-                            departmentId={user.departmentId}
-                          />
-                        </td>
-                        <td className="p-3 text-center text-lg text-orange-600">
-                          <WeekTotalCell 
-                            periods={[
-                              ['2025-11-03T06:00:00', '2025-11-03T09:02:00'],
-                              ['2025-11-03T09:02:00', '2025-11-04T06:00:00'],
-                              ['2025-11-04T06:00:00', '2025-11-04T18:06:00'],
-                              ['2025-11-04T18:06:00', '2025-11-04T19:31:00'],
-                              ['2025-11-04T19:31:00', '2025-11-05T00:00:00']
-                            ]}
-                            isPause={true}
-                            departmentId={user.departmentId}
-                          />
-                        </td>
-                        <td className="p-3"></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                <DynamicWeekTable 
+                  departmentId={user.departmentId}
+                  supabase={supabase}
+                  editingRow={editingRow}
+                  setEditingRow={setEditingRow}
+                  editRowData={editRowData}
+                  setEditRowData={setEditRowData}
+                  savedProductionData={savedProductionData}
+                  saveProductionData={saveProductionData}
+                />
+
               </div>
             </div>
           )}
