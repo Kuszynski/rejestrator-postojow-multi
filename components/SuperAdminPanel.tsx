@@ -64,8 +64,14 @@ function FactoryAnalytics({ departments }: { departments: Department[] }) {
       })) || [];
 
       // Filter by time ranges
-      const todayData = enrichedData.filter(d => d.date === today);
-      const weekData = enrichedData.filter(d => new Date(d.date) >= weekAgo);
+      const todayData = enrichedData.filter(d => {
+        const startDate = new Date(d.start_time).toISOString().split('T')[0];
+        return startDate === today;
+      });
+      const weekData = enrichedData.filter(d => {
+        const startDate = new Date(d.start_time);
+        return startDate >= weekAgo;
+      });
       const monthData = enrichedData;
 
       // Calculate department stats
@@ -128,7 +134,10 @@ function FactoryAnalytics({ departments }: { departments: Department[] }) {
         const date = new Date();
         date.setDate(date.getDate() - i);
         const dateStr = date.toISOString().split('T')[0];
-        const dayData = enrichedData.filter(d => d.date === dateStr);
+        const dayData = enrichedData.filter(d => {
+          const startDate = new Date(d.start_time).toISOString().split('T')[0];
+          return startDate === dateStr;
+        });
         
         trends.push({
           date: dateStr,
@@ -376,7 +385,8 @@ function LiveAllDowntimes() {
           *,
           departments(display_name)
         `)
-        .eq('date', today)
+        .gte('start_time', today + 'T00:00:00')
+        .lt('start_time', today + 'T23:59:59')
         .order('start_time', { ascending: false })
         .limit(50);
 
@@ -515,7 +525,8 @@ function LiveDepartmentOverview({ department }: { department: Department }) {
         .from('downtimes')
         .select('*')
         .eq('department_id', department.id)
-        .eq('date', today)
+        .gte('start_time', today + 'T00:00:00')
+        .lt('start_time', today + 'T23:59:59')
         .order('start_time', { ascending: false });
 
       if (error) {

@@ -53,7 +53,8 @@ export default function MultiDepartmentTracker() {
           if (result.user.role === 'super' || 
               result.user.departmentName === selectedDepartment.displayName ||
               (selectedDepartment.name === 'haslestad' && result.user.departmentId === 1) ||
-              (selectedDepartment.name === 'justeverkt' && result.user.departmentId === 2)) {
+              (selectedDepartment.name === 'justeverkt' && result.user.departmentId === 2) ||
+              (selectedDepartment.name === 'saga' && (result.user.departmentId === 3 || result.user.departmentName?.toLowerCase() === 'saga'))) {
             setUser(result.user);
             setLoginForm({ username: '', password: '' });
           } else {

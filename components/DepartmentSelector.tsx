@@ -27,6 +27,18 @@ export default function DepartmentSelector({ onDepartmentSelect, selectedDepartm
   const loadDepartments = async () => {
     setLoading(true);
     const deps = await getDepartments();
+    
+    // Add saga department as fallback if not in database
+    const hasSaga = deps.some(d => d.name === 'saga');
+    if (!hasSaga) {
+      deps.push({
+        id: 999, // Temporary ID for saga
+        name: 'saga',
+        displayName: 'Saga',
+        isActive: true
+      });
+    }
+    
     setDepartments(deps);
     
     // Don't auto-select - let user choose

@@ -128,19 +128,39 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
   const [savedProductionData, setSavedProductionData] = useState({});
   const [showNoteEditor, setShowNoteEditor] = useState(false);
 
+  // Initialize post number for saga department immediately
+  useEffect(() => {
+    if ((department?.name === 'saga' || user.departmentName?.toLowerCase() === 'saga') && !currentPostNumber) {
+      console.log('Saga department detected, activating post 120890');
+      setCurrentPostNumber('120890');
+    }
+  }, [department, user, currentPostNumber]);
+
   const today = new Date().toISOString().split('T')[0];
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = yesterday.toISOString().split('T')[0];
   
   const todayDowntimes = downtimeHistory.filter(d => {
-    const endDate = d.endTime ? new Date(d.endTime).toISOString().split('T')[0] : today;
-    return endDate === today;
+    const startDate = new Date(d.startTime).toISOString().split('T')[0];
+    const isToday = startDate === today;
+    // Debug log
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Filtering downtime:', {
+        id: d.id,
+        startTime: d.startTime,
+        startDate,
+        today,
+        isToday,
+        machineName: d.machineName
+      });
+    }
+    return isToday;
   });
   
   const yesterdayDowntimes = downtimeHistory.filter(d => {
-    const endDate = d.endTime ? new Date(d.endTime).toISOString().split('T')[0] : yesterdayStr;
-    return endDate === yesterdayStr;
+    const startDate = new Date(d.startTime).toISOString().split('T')[0];
+    return startDate === yesterdayStr;
   });
 
   useEffect(() => {
@@ -150,6 +170,13 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
       });
     } else if (user.role === 'super_admin') {
       setLoading(false);
+    }
+    
+    // Special handling for saga department - ensure post 120890 is active
+    if (department?.name === 'saga' || user.departmentName?.toLowerCase() === 'saga') {
+      if (!currentPostNumber) {
+        setCurrentPostNumber('120890');
+      }
     }
   }, [department, user]);
 
@@ -297,6 +324,11 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
         
         if (yesterdayOmpostings.length > 0) {
           setCurrentPostNumber(yesterdayOmpostings[0].postNumber);
+        } else {
+          // Special case for saga department - activate post 120890 if no active post
+          if (department?.name === 'saga' || user.departmentName?.toLowerCase() === 'saga') {
+            setCurrentPostNumber('120890');
+          }
         }
       }
     } catch (error) {
