@@ -1587,51 +1587,50 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                   <div>
                     <h2 className="text-2xl font-bold mb-2">Ukerapport</h2>
                     <div className="flex items-center gap-4">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold">{(() => {
-                          const periods = [
-                            ['2025-11-03T06:00:00', '2025-11-03T09:02:00'],
-                            ['2025-11-03T09:02:00', '2025-11-04T06:00:00'],
-                            ['2025-11-04T06:00:00', '2025-11-04T18:06:00'],
-                            ['2025-11-04T18:06:00', '2025-11-04T19:31:00'],
-                            ['2025-11-04T19:31:00', '2025-11-05T00:00:00']
-                          ];
-                          return downtimeHistory.filter(d => {
-                            const startTime = new Date(d.startTime).toISOString();
-                            return periods.some(([start, end]) => startTime >= start && startTime < end);
-                          }).length;
-                        })()}</div>
+                      <div className="text-center" id="week-total-count">
+                        <div className="text-2xl font-bold">...</div>
                         <div className="text-purple-100 text-sm">stanser</div>
                       </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold">{(() => {
-                          const periods = [
-                            ['2025-11-03T06:00:00', '2025-11-03T09:02:00'],
-                            ['2025-11-03T09:02:00', '2025-11-04T06:00:00'],
-                            ['2025-11-04T06:00:00', '2025-11-04T18:06:00'],
-                            ['2025-11-04T18:06:00', '2025-11-04T19:31:00'],
-                            ['2025-11-04T19:31:00', '2025-11-05T00:00:00']
-                          ];
-                          return downtimeHistory.filter(d => {
-                            const startTime = new Date(d.startTime).toISOString();
-                            return periods.some(([start, end]) => startTime >= start && startTime < end);
-                          }).reduce((sum, d) => sum + d.duration, 0);
-                        })()}</div>
+                      <div className="text-center" id="week-total-time">
+                        <div className="text-2xl font-bold">...</div>
                         <div className="text-purple-100 text-sm">min total</div>
                       </div>
                       <div className="flex gap-2">
                         <button 
-                          onClick={() => {
-                            const csvContent = [
-                              ['Dag', 'Dato', 'Post nr', 'Start omposting', 'Stop omposting', 'Stop tid', 'Mat pause'],
-                              ['Mandag', '3.11.', '23453', '06:00', '09:02', '', ''],
-                              ['Mandag', '3.11.', '108018', '09:02', '06:00', '', ''],
-                              ['Tirsdag', '4.11.', '108018', '23:20', '18:06', '', ''],
-                              ['Tirsdag', '4.11.', '31118', '18:06', '19:31', '', ''],
-                              ['Tirsdag', '4.11.', '45678', '19:31', '-', '', '']
-                            ].map(row => row.join(',')).join('\n');
+                          onClick={async () => {
+                            const tableElement = document.querySelector('.overflow-x-auto table');
+                            if (!tableElement) return;
                             
-                            const blob = new Blob([csvContent], { type: 'text/csv' });
+                            const rows = [];
+                            const headers = [];
+                            
+                            const headerCells = tableElement.querySelectorAll('thead th');
+                            headerCells.forEach(cell => headers.push(cell.textContent.trim()));
+                            rows.push(headers);
+                            
+                            const dataRows = tableElement.querySelectorAll('tbody tr');
+                            dataRows.forEach(row => {
+                              const cells = row.querySelectorAll('td');
+                              const rowData = [];
+                              cells.forEach((cell, index) => {
+                                if (index < cells.length - 1) {
+                                  let value = cell.textContent.trim();
+                                  value = value.replace(/ min/g, '').replace(/\s+/g, ' ');
+                                  rowData.push(value);
+                                }
+                              });
+                              if (rowData.length > 0) {
+                                rows.push(rowData);
+                              }
+                            });
+                            
+                            const csvContent = '\uFEFF' + rows.map(row => 
+                              row.map(cell => {
+                                const str = String(cell).replace(/"/g, '""');
+                                return '"' + str + '"';
+                              }).join(';')
+                            ).join('\r\n');
+                            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');
                             a.href = url;
@@ -1644,7 +1643,184 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                           Excel
                         </button>
                         <button 
-                          onClick={() => window.print()}
+                          onClick={() => {
+                            const printWindow = window.open('', '_blank');
+                            const tableElement = document.querySelector('.overflow-x-auto table');
+                            if (!tableElement || !printWindow) return;
+                            
+                            const rows = [];
+                            const headers = [];
+                            let totalValue = '0';
+                            
+                            const headerCells = tableElement.querySelectorAll('thead th');
+                            headerCells.forEach(cell => headers.push(cell.textContent.trim()));
+                            
+                            const dataRows = tableElement.querySelectorAll('tbody tr');
+                            dataRows.forEach(row => {
+                              const cells = row.querySelectorAll('td');
+                              const firstCell = cells[0];
+                              if (firstCell && firstCell.textContent.includes('TOTALT')) {
+                                if (cells[1]) totalValue = cells[1].textContent.trim();
+                                return;
+                              }
+                              const rowData = [];
+                              cells.forEach((cell, index) => {
+                                if (index < cells.length - 1) {
+                                  let value = cell.textContent.trim();
+                                  value = value.replace(/ min/g, '').replace(/\s+/g, ' ');
+                                  rowData.push(value);
+                                }
+                              });
+                              if (rowData.length > 0) {
+                                rows.push(rowData);
+                              }
+                            });
+                            
+                            const today = new Date().toLocaleDateString('nb-NO', { 
+                              weekday: 'long', 
+                              day: 'numeric', 
+                              month: 'long', 
+                              year: 'numeric' 
+                            });
+                            
+                            const getWeekNumber = (date) => {
+                              const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+                              const dayNum = d.getUTCDay() || 7;
+                              d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+                              const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+                              return Math.ceil((((d - yearStart) / 86400000) + 1)/7);
+                            };
+                            const weekNumber = getWeekNumber(new Date());
+                            
+                            printWindow.document.write(`
+                              <!DOCTYPE html>
+                              <html>
+                              <head>
+                                <meta charset="utf-8">
+                                <title>Ukerapport - Uke ${weekNumber} - ${today}</title>
+                                <style>
+                                  @media print {
+                                    @page { margin: 1.5cm; size: A4 landscape; }
+                                    body { margin: 0; }
+                                  }
+                                  body {
+                                    font-family: Arial, sans-serif;
+                                    padding: 20px;
+                                    background: white;
+                                  }
+                                  .header {
+                                    text-align: center;
+                                    margin-bottom: 30px;
+                                    border-bottom: 3px solid #333;
+                                    padding-bottom: 15px;
+                                  }
+                                  .header h1 {
+                                    margin: 0 0 10px 0;
+                                    color: #333;
+                                    font-size: 28px;
+                                  }
+                                  .header p {
+                                    margin: 5px 0;
+                                    color: #666;
+                                    font-size: 14px;
+                                  }
+                                  table {
+                                    width: 100%;
+                                    border-collapse: collapse;
+                                    margin-top: 20px;
+                                    font-size: 11px;
+                                  }
+                                  th {
+                                    background-color: #4a5568;
+                                    color: white;
+                                    padding: 12px 8px;
+                                    text-align: left;
+                                    font-weight: bold;
+                                    border: 1px solid #2d3748;
+                                  }
+                                  td {
+                                    padding: 10px 8px;
+                                    border: 1px solid #e2e8f0;
+                                  }
+                                  tr:nth-child(even) {
+                                    background-color: #f7fafc;
+                                  }
+                                  tr:hover {
+                                    background-color: #edf2f7;
+                                  }
+                                  .footer {
+                                    margin-top: 30px;
+                                    padding-top: 15px;
+                                    border-top: 2px solid #e2e8f0;
+                                    text-align: center;
+                                    color: #718096;
+                                    font-size: 12px;
+                                  }
+                                  .summary {
+                                    margin: 20px 0;
+                                    padding: 15px;
+                                    background: #edf2f7;
+                                    border-left: 4px solid #4299e1;
+                                    border-radius: 4px;
+                                  }
+                                  .summary-item {
+                                    display: inline-block;
+                                    margin-right: 30px;
+                                    font-size: 14px;
+                                  }
+                                  .summary-label {
+                                    color: #4a5568;
+                                    font-weight: bold;
+                                  }
+                                  .summary-value {
+                                    color: #2d3748;
+                                    font-size: 18px;
+                                    font-weight: bold;
+                                  }
+                                </style>
+                              </head>
+                              <body>
+                                <div class="header">
+                                  <h1>📊 Ukerapport - Uke ${weekNumber}</h1>
+                                  <p><strong>Avdeling:</strong> ${department?.displayName || 'Ukjent'}</p>
+                                  <p><strong>Dato:</strong> ${today}</p>
+                                </div>
+                                
+                                <div class="summary">
+                                  <div class="summary-item">
+                                    <span class="summary-label">Uke totalt - Stansetid:</span>
+                                    <span class="summary-value">${totalValue}</span>
+                                  </div>
+                                </div>
+                                
+                                <table>
+                                  <thead>
+                                    <tr>
+                                      ${headers.map(h => `<th>${h}</th>`).join('')}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    ${rows.map(row => `
+                                      <tr>
+                                        ${row.map(cell => `<td>${cell}</td>`).join('')}
+                                      </tr>
+                                    `).join('')}
+                                  </tbody>
+                                </table>
+                                
+                                <div class="footer">
+                                  <p>Generert: ${new Date().toLocaleString('nb-NO')}</p>
+                                  <p>StansLogg - Rapporteringssystem</p>
+                                </div>
+                              </body>
+                              </html>
+                            `);
+                            
+                            printWindow.document.close();
+                            setTimeout(() => {
+                              printWindow.print();
+                            }, 250);
+                          }}
                           className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-medium transition-colors"
                         >
                           📄 PDF
@@ -1769,7 +1945,12 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                               return entryDateOnly >= weekStartOnly && entryDateOnly <= weekEndOnly;
                             });
                             
-                            const csvContent = [
+                            const escapeCSV = (val) => {
+                              const str = String(val).replace(/"/g, '""');
+                              return '"' + str + '"';
+                            };
+                            
+                            const csvContent = '\uFEFF' + [
                               ['#', 'Dato', 'Tid', 'Maskin', 'Årsak', 'Varighet', 'Post Nr', 'Operatør'],
                               ...weekDowntimes.map((d, index) => [
                                 index + 1,
@@ -1781,7 +1962,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                                 d.postNumber || '-',
                                 d.operatorName
                               ])
-                            ].map(row => row.join(',')).join('\n');
+                            ].map(row => row.map(cell => escapeCSV(cell)).join(';')).join('\r\n');
                             
                             const blob = new Blob([csvContent], { type: 'text/csv' });
                             const url = URL.createObjectURL(blob);
@@ -1797,7 +1978,7 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                         </button>
                         <button 
                           onClick={() => window.print()}
-                          className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-medium transition-colors"
+                          className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-medium transition-colors no-print"
                         >
                           📄 PDF
                         </button>
@@ -2483,7 +2664,34 @@ export default function DepartmentDowntimeTracker({ user, department, onLogout }
                       </div>
                       <div className="flex gap-2">
                         <button 
-                          onClick={() => exportToExcel()}
+                          onClick={() => {
+                            const escapeCSV = (val) => {
+                              const str = String(val).replace(/"/g, '""');
+                              return '"' + str + '"';
+                            };
+                            
+                            const csvContent = '\uFEFF' + [
+                              ['#', 'Dato', 'Tid', 'Maskin', 'Årsak', 'Varighet', 'Post Nr', 'Operatør'],
+                              ...todayDowntimes.map((d, index) => [
+                                index + 1,
+                                new Date(d.startTime).toLocaleDateString('nb-NO'),
+                                `${new Date(d.startTime).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}-${new Date(d.endTime).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}`,
+                                d.machineName,
+                                d.comment,
+                                `${d.duration} min`,
+                                d.postNumber || '-',
+                                d.operatorName
+                              ])
+                            ].map(row => row.map(cell => escapeCSV(cell)).join(';')).join('\r\n');
+                            
+                            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `stanser-${new Date().toISOString().split('T')[0]}.csv`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
                           className="px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-sm font-medium transition-colors"
                         >
                           Excel

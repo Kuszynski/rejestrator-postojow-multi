@@ -238,24 +238,52 @@ export default function ReportSystem() {
           <p>Wygenerowano: ${new Date().toLocaleString('pl-PL')}</p>
         </div>
         
-        <div class="stats">
-          <div class="stat-box">
-            <h3>Łączny czas postojów</h3>
-            <p style="font-size: 24px; color: #dc2626;">${reportData.totalDowntime} min</p>
-          </div>
-          <div class="stat-box">
-            <h3>Liczba postojów</h3>
-            <p style="font-size: 24px; color: #ea580c;">${reportData.totalStops}</p>
-          </div>
-          <div class="stat-box">
-            <h3>Średni czas postoju</h3>
-            <p style="font-size: 24px; color: #7c3aed;">${reportData.avgDowntime} min</p>
-          </div>
-          <div class="stat-box">
-            <h3>Liczba maszyn</h3>
-            <p style="font-size: 24px; color: #059669;">${reportData.topMachines.length}</p>
-          </div>
-        </div>
+        <h3>Podsumowanie tygodnia</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Dag</th>
+              <th>Dato</th>
+              <th>Post nr</th>
+              <th>Antall</th>
+              <th>ALT</th>
+              <th>Snitt lengde</th>
+              <th>Sp vol l/stl</th>
+              <th>Utbytte</th>
+              <th>Start omposting</th>
+              <th>Stop omposting</th>
+              <th>Stop tid</th>
+              <th>Ant. postojów</th>
+              <th>Mat pause</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${reportData.dailyTrend.map(day => {
+              const dayData = reportData.operators.find(o => o.name === day.date) || {};
+              return `<tr>
+                <td>-</td>
+                <td>${day.date}</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>${day.duration} min</td>
+                <td>${day.stops}</td>
+                <td>-</td>
+              </tr>`;
+            }).join('')}
+            <tr style="font-weight: bold; background-color: #f5f5f5;">
+              <td colspan="10">UKE TOTALT:</td>
+              <td>${reportData.totalDowntime} min</td>
+              <td>${reportData.totalStops}</td>
+              <td>-</td>
+            </tr>
+          </tbody>
+        </table>
 
         <h3>Top Maszyny</h3>
         <table class="table">

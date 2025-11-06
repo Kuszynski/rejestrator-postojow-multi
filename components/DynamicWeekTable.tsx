@@ -170,7 +170,7 @@ function DowntimeCountCell({ start, end, departmentId, supabase }) {
   return <>{count}</>;
 }
 
-function WeekTotalCountCell({ periods, departmentId, supabase }) {
+function WeekTotalCountCell({ periods, departmentId, supabase, isPause }) {
   const [total, setTotal] = React.useState('...');
   
   React.useEffect(() => {
@@ -189,7 +189,7 @@ function WeekTotalCountCell({ periods, departmentId, supabase }) {
           const count = data
             .filter(d => {
               const comment = d.comment.toLowerCase();
-              return !(comment.includes('pause') || comment.includes('mat'));
+              return isPause ? (comment.includes('pause') || comment.includes('mat')) : !(comment.includes('pause') || comment.includes('mat'));
             })
             .length;
           totalCount += count;
@@ -197,6 +197,21 @@ function WeekTotalCountCell({ periods, departmentId, supabase }) {
       }
       
       setTotal(totalCount.toString());
+      
+      // Update header with sum of both
+      if (!isPause) {
+        window.weekTotalStopCount = totalCount;
+      } else {
+        window.weekTotalPauseCount = totalCount;
+      }
+      
+      if (window.weekTotalStopCount !== undefined && window.weekTotalPauseCount !== undefined) {
+        const headerEl = document.getElementById('week-total-count');
+        if (headerEl) {
+          const valueEl = headerEl.querySelector('.text-2xl');
+          if (valueEl) valueEl.textContent = (window.weekTotalStopCount + window.weekTotalPauseCount).toString();
+        }
+      }
     };
     
     if (periods.length > 0) {
@@ -205,7 +220,7 @@ function WeekTotalCountCell({ periods, departmentId, supabase }) {
       const interval = setInterval(fetchWeekTotal, 10000);
       return () => clearInterval(interval);
     }
-  }, [periods, departmentId, supabase]);
+  }, [periods, departmentId, supabase, isPause]);
   
   return <>{total}</>;
 }
@@ -249,6 +264,21 @@ function WeekTotalCell({ periods, isPause, departmentId, supabase }) {
       }
       
       setTotal(totalMinutes + ' min');
+      
+      // Update header with sum of both
+      if (!isPause) {
+        window.weekTotalStopTime = totalMinutes;
+      } else {
+        window.weekTotalPauseTime = totalMinutes;
+      }
+      
+      if (window.weekTotalStopTime !== undefined && window.weekTotalPauseTime !== undefined) {
+        const headerEl = document.getElementById('week-total-time');
+        if (headerEl) {
+          const valueEl = headerEl.querySelector('.text-2xl');
+          if (valueEl) valueEl.textContent = (window.weekTotalStopTime + window.weekTotalPauseTime).toString();
+        }
+      }
     };
     
     if (periods.length > 0) {
@@ -542,10 +572,13 @@ export default function DynamicWeekTable({ departmentId, supabase, editingRow, s
               <WeekTotalCell periods={periods} isPause={false} departmentId={departmentId} supabase={supabase} />
             </td>
             <td className="p-3 text-center text-lg text-blue-600">
-              <WeekTotalCountCell periods={periods} departmentId={departmentId} supabase={supabase} />
+              <WeekTotalCountCell periods={periods} departmentId={departmentId} supabase={supabase} isPause={false} />
             </td>
             <td className="p-3 text-center text-lg text-orange-600">
               <WeekTotalCell periods={periods} isPause={true} departmentId={departmentId} supabase={supabase} />
+              <div style={{display: 'none'}}>
+                <WeekTotalCountCell periods={periods} departmentId={departmentId} supabase={supabase} isPause={true} />
+              </div>
             </td>
             <td className="p-3"></td>
           </tr>
