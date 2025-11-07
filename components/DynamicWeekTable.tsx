@@ -15,23 +15,12 @@ function DowntimeCell({ start, end, isPause, departmentId, supabase }) {
       
       if (!data) { setValue('0 min'); return; }
       
-      let sum = 0;
-      
-      // Dodaj czas postojów (bez ompostingu)
-      sum += data
+      const sum = data
         .filter(d => {
-          if (d.machine_id === 'm14') return false;
           const comment = d.comment.toLowerCase();
           return isPause ? (comment.includes('pause') || comment.includes('mat')) : !(comment.includes('pause') || comment.includes('mat'));
         })
         .reduce((s, d) => s + d.duration, 0);
-      
-      // Dodaj czas ompostingu do postojów (nie do pauz)
-      if (!isPause) {
-        sum += data
-          .filter(d => d.machine_id === 'm14')
-          .reduce((s, d) => s + d.duration, 0);
-      }
       
       setValue(sum + ' min');
     };
@@ -51,34 +40,19 @@ function PostNumberCell({ start, end, isMonday, departmentId, supabase }) {
   
   React.useEffect(() => {
     const fetchPostNumber = async () => {
-      // Sprawdź czy jest omposting na początku tego okresu
-      const { data: ompostingAtStart } = await supabase
+      const { data } = await supabase
         .from('downtimes')
         .select('post_number, start_time')
         .eq('machine_id', 'm14')
         .eq('department_id', departmentId)
-        .eq('start_time', start)
+        .lte('start_time', start)
+        .order('start_time', { ascending: false })
         .limit(1);
       
-      if (ompostingAtStart?.[0]) {
-        // Jest omposting na początku - użyj jego numeru
-        setPostNumber(ompostingAtStart[0].post_number);
-      } else {
-        // Znajdź ostatni omposting przed początkiem tego okresu
-        const { data } = await supabase
-          .from('downtimes')
-          .select('post_number, start_time')
-          .eq('machine_id', 'm14')
-          .eq('department_id', departmentId)
-          .lt('start_time', start)
-          .order('start_time', { ascending: false })
-          .limit(1);
-        
-        setPostNumber(data?.[0]?.post_number || '-');
-      }
+      setPostNumber(data?.[0]?.post_number || '-');
     };
     fetchPostNumber();
-  }, [start, end, departmentId]);
+  }, [start, end, departmentId, supabase]);
   
   return <>{postNumber}</>;
 }
@@ -89,46 +63,11 @@ function OmpostingCell({ start, end, isStart, dayName, departmentId, supabase })
   React.useEffect(() => {
     const fetchOmpostingTime = async () => {
       if (isStart) {
-        // Start omposting - sprawdź czy był nowy omposting w tym dniu
-        const { data } = await supabase
-          .from('downtimes')
-          .select('start_time')
-          .eq('machine_id', 'm14')
-          .eq('department_id', departmentId)
-          .gte('start_time', start)
-          .lt('start_time', end)
-          .order('start_time', { ascending: true })
-          .limit(1);
-        
-        if (data?.[0]) {
-          const startTime = new Date(data[0].start_time);
-          setTime(startTime.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }));
-        } else {
-          setTime('06:00');
-        }
+        const startTime = new Date(start);
+        setTime(startTime.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }));
       } else {
-        // Stop omposting - sprawdź czy jest następny omposting w tym samym dniu
-        const currentDate = new Date(start).toISOString().split('T')[0];
-        const dayEndTime = `${currentDate}T23:59:59`;
-        
-        const { data: nextInSameDay } = await supabase
-          .from('downtimes')
-          .select('start_time')
-          .eq('machine_id', 'm14')
-          .eq('department_id', departmentId)
-          .gte('start_time', end)
-          .lte('start_time', dayEndTime)
-          .order('start_time', { ascending: true })
-          .limit(1);
-        
-        if (nextInSameDay?.[0]) {
-          // Jest następny omposting w tym samym dniu
-          const stopTime = new Date(nextInSameDay[0].start_time);
-          setTime(stopTime.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }));
-        } else {
-          // Nie ma następnego w tym dniu - kończy się o 23:20 (lub 14:00 dla piątku bez nadg.)
-          setTime('23:20');
-        }
+        const endTime = new Date(end);
+        setTime(endTime.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }));
       }
     };
     fetchOmpostingTime();
@@ -144,7 +83,7 @@ function DowntimeCountCell({ start, end, departmentId, supabase }) {
     const fetchCount = async () => {
       const { data } = await supabase
         .from('downtimes')
-        .select('id, machine_id, comment')
+        .select('id, comment')
         .eq('department_id', departmentId)
         .gte('start_time', start)
         .lt('start_time', end);
@@ -241,23 +180,12 @@ function WeekTotalCell({ periods, isPause, departmentId, supabase }) {
           .lt('start_time', period.endISO);
         
         if (data) {
-          let sum = 0;
-          
-          // Dodaj czas postojów (bez ompostingu)
-          sum += data
+          const sum = data
             .filter(d => {
-              if (d.machine_id === 'm14') return false;
               const comment = d.comment.toLowerCase();
               return isPause ? (comment.includes('pause') || comment.includes('mat')) : !(comment.includes('pause') || comment.includes('mat'));
             })
             .reduce((s, d) => s + d.duration, 0);
-          
-          // Dodaj czas ompostingu do postojów (nie do pauz)
-          if (!isPause) {
-            sum += data
-              .filter(d => d.machine_id === 'm14')
-              .reduce((s, d) => s + d.duration, 0);
-          }
           
           totalMinutes += sum;
         }
@@ -369,14 +297,35 @@ export default function DynamicWeekTable({ departmentId, supabase, editingRow, s
         const dayStart = `${fullDates[i]}T06:00:00`;
         const dayEnd = `${fullDates[i]}T23:59:59`;
         
-        // Pobierz omposting dla tego dnia
-        const { data: ompostings } = await supabase
+        // Pobierz omposting dla tego dnia (włącznie z tymi które zaczęły się wczoraj)
+        const dayBefore = new Date(fullDates[i]);
+        dayBefore.setDate(dayBefore.getDate() - 1);
+        const dayBeforeStart = `${dayBefore.toISOString().split('T')[0]}T00:00:00`;
+        
+        const { data: allOmpostings } = await supabase
           .from('downtimes')
-          .select('start_time, post_number')
+          .select('start_time, post_number, end_time')
           .eq('machine_id', 'm14')
-          .gte('start_time', dayStart)
-          .lte('start_time', dayEnd)
+          .eq('department_id', departmentId)
+          .gte('start_time', dayBeforeStart)
+          .lt('start_time', dayEnd)
           .order('start_time', { ascending: true });
+        
+        // Filtruj tylko te które są w przedziale dnia lub kończą się w tym dniu
+        const ompostings = allOmpostings?.filter(o => {
+          const startTime = new Date(o.start_time).getTime();
+          const endTime = o.end_time ? new Date(o.end_time).getTime() : startTime;
+          const dayStartTime = new Date(dayStart).getTime();
+          const dayEndTime = new Date(dayEnd).getTime();
+          
+          // Omposting jest w dniu jeśli zaczyna się w dniu LUB kończy się w dniu
+          return (startTime >= dayStartTime && startTime < dayEndTime) || 
+                 (endTime >= dayStartTime && endTime <= dayEndTime);
+        }) || [];
+        
+        if (days[i] === 'Fredag') {
+          console.log('Fredag ompostings:', ompostings, 'dayStart:', dayStart, 'dayEnd:', dayEnd);
+        }
         
         // Sprawdź czy była jakakolwiek aktywność w tym dniu
         const { data: anyActivity } = await supabase
@@ -391,40 +340,48 @@ export default function DynamicWeekTable({ departmentId, supabase, editingRow, s
           continue;
         }
         
-        if (!ompostings || ompostings.length === 0) {
+        // Filtruj ompostingi które są w przedziale dnia (nie wcześniej niż dayStart)
+        const dayOmpostings = ompostings.filter(o => {
+          const startTime = new Date(o.start_time).getTime();
+          const dayStartTime = new Date(dayStart).getTime();
+          return startTime >= dayStartTime;
+        });
+        
+        if (!dayOmpostings || dayOmpostings.length === 0) {
           // Brak omposting - jeden okres na cały dzień
-          const endTime = days[i] === 'Fredag' ? 
-            (anyActivity ? `${fullDates[i]}T23:20:00` : `${fullDates[i]}T14:00:00`) : 
-            `${fullDates[i]}T23:20:00`;
-          
           newPeriods.push({
             day: days[i],
             date: dates[i],
             startISO: dayStart,
-            endISO: endTime
+            endISO: dayEnd
           });
         } else {
           // Pierwszy okres - od 06:00 do pierwszego omposting
-          const firstOmposting = ompostings[0];
           newPeriods.push({
             day: days[i],
             date: dates[i],
             startISO: dayStart,
-            endISO: firstOmposting.start_time
+            endISO: dayOmpostings[0].start_time
           });
           
+          if (days[i] === 'Fredag') {
+            console.log('Fredag first period:', dayStart, '-', dayOmpostings[0].start_time);
+          }
+          
           // Okresy między omposting
-          for (let j = 0; j < ompostings.length; j++) {
-            const currentOmposting = ompostings[j];
-            const nextOmposting = ompostings[j + 1];
-            const endTime = nextOmposting ? nextOmposting.start_time : `${fullDates[i]}T23:20:00`;
+          for (let j = 0; j < dayOmpostings.length; j++) {
+            const endTime = dayOmpostings[j + 1] ? dayOmpostings[j + 1].start_time : dayEnd;
             
             newPeriods.push({
               day: days[i],
               date: dates[i],
-              startISO: currentOmposting.start_time,
+              startISO: dayOmpostings[j].start_time,
               endISO: endTime
             });
+            
+            if (days[i] === 'Fredag') {
+              console.log('Fredag period', j+2, ':', dayOmpostings[j].start_time, '-', endTime);
+            }
           }
         }
       }
